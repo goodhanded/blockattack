@@ -62,7 +62,8 @@
             width: 40px;
             height: 40px;
             border: 1px solid rgba(0, 0, 0, 0.2);
-            transition: top 0.1s ease-out, left 0.1s ease-out; /* Smooth movement */
+            /* Transition for falling and swapping, NOT for top/left during continuous rise */
+            transition: top 0.1s ease-out, left 0.1s ease-out, transform 0.1s ease-out, opacity 0.1s ease-in;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -70,6 +71,9 @@
             font-weight: bold;
             color: white;
             text-shadow: 1px 1px 2px black;
+            /* transform for continuous rise offset */
+            transform: translateY(0px);
+            will-change: transform, top, left; /* Optimization hint */
         }
 
         /* Simple block colors/styles */
@@ -81,21 +85,30 @@
         .block-type-5 { background-color: #33FFFF; } /* Cyan */
 
         .block.falling {
-            transition: top 0.15s ease-in; /* Gravity fall */
+             /* Falling uses 'top' property transition */
+             transition: top 0.15s ease-in, left 0.1s ease-out, opacity 0.1s ease-in;
+             transform: translateY(0px) !important; /* Override rise transform during fall */
         }
 
         .block.swapping {
-             transition: left 0.08s linear; /* Quick swap */
+             /* Swapping uses 'left' property transition */
+             transition: left 0.08s linear, top 0.1s ease-out, opacity 0.1s ease-in;
+             transform: translateY(0px) !important; /* Override rise transform during swap */
         }
 
         .block.flashing {
             animation: flash 0.4s infinite alternate;
+            /* Ensure transform doesn't interfere with flash scaling */
+             /* transform-origin: center center; (usually default) */
         }
 
         @keyframes flash {
             0% { opacity: 1; transform: scale(1.05); box-shadow: 0 0 10px white; }
             100% { opacity: 0.5; transform: scale(1); box-shadow: none; }
         }
+        /* Note: Flash animation might conflict visually with translateY. Careful testing needed. */
+        /* If conflict, might need to apply translateY to a wrapper element instead. */
+
 
         #cursor {
             position: absolute;
@@ -106,6 +119,9 @@
             transition: top 0.05s linear, left 0.05s linear;
             z-index: 10;
             box-shadow: 0 0 8px #FFF;
+            /* Cursor also needs to move with the rise */
+             transform: translateY(0px);
+             will-change: transform, top, left;
         }
 
         #game-over-overlay, #start-overlay {
@@ -185,20 +201,24 @@
     <script>
         // --- Game Constants ---
         const GRID_WIDTH = 6;
-        const GRID_HEIGHT = 12; // Playable rows
-        const VISIBLE_GRID_HEIGHT = 12; // How many rows are visible
+        const GRID_HEIGHT = 12; // Playable rows (logical grid height)
+        const VISIBLE_GRID_HEIGHT = 12; // How many rows are visible on screen
         const BLOCK_SIZE = 40; // px
         const BLOCK_TYPES = 6; // Number of different block colors/types
         const MIN_MATCH_LENGTH = 3;
 
-        const INITIAL_RISE_INTERVAL = 5000; // ms
-        const RISE_INTERVAL_DECREMENT = 50; // ms to decrease each rise
-        const MIN_RISE_INTERVAL = 500; // ms fastest rise speed
-        const STACK_RISE_AMOUNT = BLOCK_SIZE; // px
+        // --- Continuous Rise Constants ---
+        const INITIAL_RISE_SPEED = BLOCK_SIZE / 5.0; // Pixels per second (e.g., 1 block every 5 seconds)
+        const MAX_RISE_SPEED = BLOCK_SIZE / 0.5;   // Pixels per second (e.g., 1 block every 0.5 seconds)
+        const RISE_ACCELERATION = 0.5; // Pixels per second to add *per second* (or adjust based on time/events)
+        // Alternative: Increase speed slightly every time a row commits
+        const SPEED_INCREMENT_ON_COMMIT = 1.0; // Pixels per second increase
+
 
         const FLASH_DURATION = 400; // ms for blocks to flash
         const INDIVIDUAL_REMOVE_DELAY = 50; // ms between each block vanishing in a match
         const FALL_DURATION = 150; // ms for falling animation (matches CSS)
+        const SWAP_DURATION = 80; // ms for swap animation (matches CSS)
 
         // --- DOM Elements ---
         const gameBoard = document.getElementById('game-board');
@@ -212,38 +232,32 @@
         const startButton = document.getElementById('start-button');
 
         // --- Game State ---
-        let grid = []; // 2D array representing block types (or null for empty)
+        let grid = []; // 2D array representing block types (or null for empty) - GRID_HEIGHT+1 tall for buffer
         let blocks = []; // Array of block objects { element, row, col, type, id, state }
-        let cursor = { row: 5, col: 2 }; // Initial cursor position
+        let cursor = { row: 5, col: 2 }; // Initial cursor position (logical row)
         let score = 0;
         let currentChain = 0;
-        let riseIntervalId = null;
-        let currentRiseInterval = INITIAL_RISE_INTERVAL;
         let isGameOver = false;
         let isProcessing = false; // Flag to manage sequential processing (clearing, falling)
         let nextBlockId = 0;
-        // let blocksToClear = []; // Removed global blocksToClear, handled locally now
-        let activeClearPromises = []; // Track ongoing clearing sequences
-        // --- Audio Assets (Base64 Encoded) ---
-        // Simple synthesized sounds (replace with actual Base64 if you have files)
-        // Format: new Audio('data:audio/wav;base64,YOUR_BASE64_STRING');
+        let activeClearPromises = [];
 
-        // Placeholder for Swap Sound (Generate a simple click/pop online)
-        const swapSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'+Array(100).join('100')); // Short generic sound
+        // --- Continuous Rise State ---
+        let riseOffset = 0; // Current pixel offset for the continuous rise (0 to BLOCK_SIZE)
+        let currentRiseSpeed = INITIAL_RISE_SPEED; // Pixels per second
+        let lastTimestamp = 0; // For calculating delta time in animation loop
+        let animationFrameId = null; // To control the animation loop
 
-        // Placeholder for Clear Sound (Generate a short blip or pop)
-         const clearSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'+Array(150).join('123')); // Slightly different short sound
 
-        // Placeholder for Game Over Sound (Generate a simple descending tone sequence)
-        const gameOverSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'+Array(300).join('987')); // Longer descending sound
-
-         // --- Audio Playback Helper ---
-        // Browsers often require user interaction before playing audio.
-        // The 'Start Game' button click will enable audio context.
+        // --- Audio Assets (Placeholders) ---
+        const swapSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'+Array(100).join('100'));
+        const clearSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'+Array(150).join('123'));
+        const gameOverSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'+Array(300).join('987'));
         let audioContextAllowed = false;
+
         function playSound(sound) {
              if (!audioContextAllowed) return;
-             sound.currentTime = 0; // Rewind to start
+             sound.currentTime = 0;
              sound.play().catch(e => console.warn("Audio play failed:", e));
          }
 
@@ -255,43 +269,52 @@
             isProcessing = false;
             score = 0;
             currentChain = 0;
-            currentRiseInterval = INITIAL_RISE_INTERVAL;
             cursor = { row: 5, col: 2 };
             nextBlockId = 0;
-            blocksToClear = [];
             activeClearPromises = [];
 
-            // Clear existing intervals and DOM elements
-            if (riseIntervalId) clearInterval(riseIntervalId);
-            gameBoard.querySelectorAll('.block').forEach(el => el.remove()); // Clear old blocks
+            // Reset rise state
+            riseOffset = 0;
+            currentRiseSpeed = INITIAL_RISE_SPEED;
+            lastTimestamp = 0;
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
 
-            // Initialize grid and blocks array
-            grid = Array(GRID_HEIGHT + 1).fill(null).map(() => Array(GRID_WIDTH).fill(null)); // +1 buffer row at top
+            // Clear existing DOM elements
+            gameBoard.querySelectorAll('.block').forEach(el => el.remove());
+
+            // Initialize grid and blocks array (GRID_HEIGHT + 1 for buffer row at the top)
+            grid = Array(GRID_HEIGHT + 1).fill(null).map(() => Array(GRID_WIDTH).fill(null));
             blocks = [];
 
             // Create initial stack (e.g., bottom 5 rows)
             for (let r = 0; r < 5; r++) {
-                generateNewRow(r);
+                // Generate row data WITHOUT rendering yet
+                generateNewRowData(r);
             }
-             // Add empty rows above initial stack
-            for(let r=5; r < GRID_HEIGHT; r++){
-                 for(let c=0; c < GRID_WIDTH; c++){
+             // Add empty rows above initial stack in the model
+            for(let r = 5; r < GRID_HEIGHT + 1; r++){ // Include buffer row
+                 for(let c = 0; c < GRID_WIDTH; c++){
                      grid[r][c] = null;
                  }
             }
 
+            // Now render all initial blocks
+            blocks.forEach(renderBlock);
+
             updateScoreDisplay();
             updateChainDisplay();
-            renderCursor();
+            renderCursor(); // Render cursor based on logical position and current riseOffset
 
             gameOverOverlay.style.display = 'none';
-            startOverlay.style.display = 'none'; // Hide start overlay after init
+            startOverlay.style.display = 'none';
+            cursorElement.style.display = 'block'; // Show cursor
 
-            // Start the game loop (rising stack)
-            riseIntervalId = setInterval(riseStack, currentRiseInterval);
-            console.log("Game initialized. First rise in", currentRiseInterval, "ms");
+            console.log("Game initialized. Starting continuous rise.");
+            // Start the continuous rise animation loop
+            startGameLoop();
 
-            // Start checking for matches immediately in case the initial setup has some
+            // Check initial matches
             checkMatchesAndProcess();
         }
 
@@ -299,22 +322,54 @@
         function renderBlock(blockData) {
             const blockElement = document.createElement('div');
             blockElement.classList.add('block', `block-type-${blockData.type}`);
-            blockElement.style.left = `${blockData.col * BLOCK_SIZE}px`;
-            blockElement.style.top = `${(VISIBLE_GRID_HEIGHT - 1 - blockData.row) * BLOCK_SIZE}px`;
             blockElement.dataset.id = blockData.id; // Assign unique ID
             blockData.element = blockElement; // Store element reference
+            updateBlockVisualPosition(blockData); // Set initial position including rise offset
             gameBoard.appendChild(blockElement);
         }
 
-        function updateBlockPosition(blockData) {
+        // Updates both CSS 'top'/'left' and 'transform' for rise offset
+        function updateBlockVisualPosition(blockData) {
             if (!blockData.element) return;
-            blockData.element.style.left = `${blockData.col * BLOCK_SIZE}px`;
-            blockData.element.style.top = `${(VISIBLE_GRID_HEIGHT - 1 - blockData.row) * BLOCK_SIZE}px`;
+
+            // Base position from logical row/col
+            const baseX = blockData.col * BLOCK_SIZE;
+            const baseY = (VISIBLE_GRID_HEIGHT - 1 - blockData.row) * BLOCK_SIZE;
+
+            blockData.element.style.left = `${baseX}px`;
+            blockData.element.style.top = `${baseY}px`;
+
+            // Apply vertical offset for continuous rise, unless falling or swapping
+             if (blockData.state !== 'falling' && blockData.state !== 'swapping') {
+                blockData.element.style.transform = `translateY(${-riseOffset}px)`;
+            } else {
+                 // Ensure transform is reset if it was falling/swapping previously
+                 // The specific transitions handle movement, but ensure rise offset isn't applied
+                 blockData.element.style.transform = `translateY(0px)`;
+            }
         }
 
+        // Dedicated function to update all block visuals, including rise offset
+        function updateAllBlockVisualPositions() {
+            blocks.forEach(block => {
+                if (block.element) {
+                    updateBlockVisualPosition(block);
+                }
+            });
+            // Also update cursor position
+            renderCursor();
+        }
+
+
         function renderCursor() {
-            cursorElement.style.left = `${cursor.col * BLOCK_SIZE}px`;
-            cursorElement.style.top = `${(VISIBLE_GRID_HEIGHT - 1 - cursor.row) * BLOCK_SIZE}px`;
+            // Base position from logical row/col
+             const baseX = cursor.col * BLOCK_SIZE;
+             const baseY = (VISIBLE_GRID_HEIGHT - 1 - cursor.row) * BLOCK_SIZE;
+
+             cursorElement.style.left = `${baseX}px`;
+             cursorElement.style.top = `${baseY}px`;
+             // Apply vertical offset for continuous rise
+             cursorElement.style.transform = `translateY(${-riseOffset}px)`;
         }
 
         function updateScoreDisplay() {
@@ -325,138 +380,209 @@
             chainElement.textContent = `Chain: x${currentChain}`;
         }
 
-        // --- Core Game Logic ---
+        // --- Core Game Loop (Continuous Rise) ---
 
-        function generateNewRow(targetRow) {
-            let newRowBlocks = [];
-            for (let c = 0; c < GRID_WIDTH; c++) {
-                const type = Math.floor(Math.random() * BLOCK_TYPES);
-                const id = nextBlockId++;
-                const newBlock = {
-                    id: id,
-                    row: targetRow,
-                    col: c,
-                    type: type,
-                    element: null, // Will be created by renderBlock
-                    state: 'idle' // States: 'idle', 'swapping', 'flashing', 'clearing', 'falling'
-                };
-                grid[targetRow][c] = newBlock;
-                blocks.push(newBlock);
-                renderBlock(newBlock);
-                newRowBlocks.push(newBlock);
-            }
-             // Prevent instant matches on new row generation (optional but common)
-            // This basic check just re-rolls if a horizontal match of 3 is made
-            let requiresCheck = true;
-             while (requiresCheck) {
-                requiresCheck = false;
-                for(let c = 0; c < GRID_WIDTH - 2; c++){
-                    if(grid[targetRow][c]?.type === grid[targetRow][c+1]?.type &&
-                       grid[targetRow][c]?.type === grid[targetRow][c+2]?.type){
-                           const newType = (grid[targetRow][c].type + 1 + Math.floor(Math.random() * (BLOCK_TYPES-1))) % BLOCK_TYPES;
-                           grid[targetRow][c].type = newType;
-                           grid[targetRow][c].element.className = `block block-type-${newType}`; // Update class immediately
-                           requiresCheck = true; // Re-check the row after change
-                           c = -1; // Restart check from beginning of row
-                       }
-                }
-            }
+        function startGameLoop() {
+             if (isGameOver) return;
+             lastTimestamp = performance.now(); // Use performance.now for higher precision
+             animationFrameId = requestAnimationFrame(gameLoop);
         }
 
+        function gameLoop(timestamp) {
+            if (isGameOver) {
+                animationFrameId = null;
+                return;
+            }
 
-        function riseStack() {
-             if (isGameOver) return;
-             console.log("Rising stack...");
+            const deltaTime = (timestamp - lastTimestamp) / 1000.0; // Delta time in seconds
+            lastTimestamp = timestamp;
 
-             // Check for game over BEFORE rising
-            for (let c = 0; c < GRID_WIDTH; c++) {
-                // If a block exists in the top visible row (GRID_HEIGHT-1) it will rise out
-                if (grid[GRID_HEIGHT - 1][c] !== null) {
-                    // Check if there's also a block in the buffer row above
-                    if (grid[GRID_HEIGHT] && grid[GRID_HEIGHT][c] !== null){
-                         // This situation shouldn't normally happen if logic is correct,
-                         // but signifies an undeniable top-out.
-                         triggerGameOver("Block reached absolute top!");
-                         return;
+            // --- Update Rise Offset ---
+            riseOffset += currentRiseSpeed * deltaTime;
+
+            // --- Check for Logical Row Commit ---
+            let rowsCommitted = 0;
+            while (riseOffset >= BLOCK_SIZE) {
+                 riseOffset -= BLOCK_SIZE;
+                 commitLogicalRise(); // Handle grid shift, new row generation, speed increase etc.
+                 rowsCommitted++;
+            }
+
+             // --- Update Visuals ---
+            // Update all block positions based on the new riseOffset (and potentially new rows if committed)
+            updateAllBlockVisualPositions();
+
+             // --- Check Game Over AFTER potential commit ---
+             // Game over if a block is *stably* in the buffer row after a commit
+             if (rowsCommitted > 0 && checkGameOverCondition()) {
+                 triggerGameOver("Block reached top after commit.");
+                 return; // Stop loop
+             }
+
+            // --- Continue Loop ---
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+         // Checks if any non-clearing block exists in the buffer row
+        function checkGameOverCondition() {
+             for (let c = 0; c < GRID_WIDTH; c++) {
+                 const block = grid[GRID_HEIGHT]?.[c]; // Check buffer row (index GRID_HEIGHT)
+                 if (block && block.state !== 'clearing' && block.state !== 'flashing') {
+                     console.log(`Game over condition met: Block ${block.id} at (${GRID_HEIGHT}, ${c}) state: ${block.state}`);
+                     return true;
+                 }
+             }
+             return false;
+         }
+
+        // --- Logical Rise Commit ---
+        function commitLogicalRise() {
+            // console.log("Committing logical rise...");
+
+            // 1. Shift all block data UP (increase row index) & update grid model
+            for (let r = GRID_HEIGHT; r >= 0; r--) { // Start from buffer row down
+                 for (let c = 0; c < GRID_WIDTH; c++) {
+                     const block = grid[r][c];
+                     if (block) {
+                         block.row++; // Increase logical row
+                         // A block moving *into* row GRID_HEIGHT+1 is game over immediately
+                         if (block.row > GRID_HEIGHT && block.state !== 'clearing' && block.state !== 'flashing') {
+                             // This check should ideally be redundant due to checkGameOverCondition, but good safety net
+                             triggerGameOver(`Block ${block.id} pushed beyond buffer row.`);
+                             // No need to continue if game over is triggered
+                             if(isGameOver) return;
+                         }
+                     }
+                     // Shift grid pointers
+                     if (r < GRID_HEIGHT) { // Don't shift *into* row -1
+                        grid[r + 1][c] = grid[r][c];
+                    } else {
+                        // Block previously at grid[GRID_HEIGHT][c] has now moved to row GRID_HEIGHT+1
+                        // We don't explicitly track row GRID_HEIGHT+1 in the grid array itself
                     }
-                    // If a block is pushed into the buffer row, game over next rise if not cleared
-                     if(grid[GRID_HEIGHT - 1][c].state !== 'clearing' && grid[GRID_HEIGHT - 1][c].state !== 'flashing'){
-                        console.log(`Block at (${GRID_HEIGHT - 1}, ${c}) will cause game over on next rise if not cleared.`);
-                        // We don't end the game *yet*, only if it RISES AGAIN from the buffer row.
-                        // A block *entering* the buffer row (row index GRID_HEIGHT) is the loss condition.
-                    }
-                }
-                 // The actual game over condition: a block is pushed into row GRID_HEIGHT
-                 if (grid[GRID_HEIGHT] && grid[GRID_HEIGHT][c] !== null) {
-                    triggerGameOver("Block forced above playfield!");
-                    return;
                  }
             }
 
-
-             // Shift all blocks up (update model `grid` and `blocks` array)
-            for (let r = GRID_HEIGHT; r >= 0; r--) { // Start from buffer row down
-                 for (let c = 0; c < GRID_WIDTH; c++) {
-                    if (grid[r][c]) {
-                         grid[r][c].row++;
-                         // Check for game over condition *during* the rise
-                         if (grid[r][c].row >= GRID_HEIGHT + 1 && grid[r][c].state !== 'clearing' && grid[r][c].state !== 'flashing') {
-                              triggerGameOver(`Block ${grid[r][c].id} rose too high!`);
-                              return;
-                         }
-                    }
-                    if (r < GRID_HEIGHT) { // Don't shift *into* row -1
-                        grid[r + 1][c] = grid[r][c];
-                    }
-                }
-            }
-
-             // Clear the bottom row in the grid model (it's now shifted up)
-            for(let c=0; c<GRID_WIDTH; c++) {
+            // 2. Clear the bottom row (row 0) in the grid model
+            for(let c = 0; c < GRID_WIDTH; c++) {
                 grid[0][c] = null;
             }
 
-             // Update DOM element positions for all blocks
-             blocks.forEach(block => {
-                 if(block.element) {
-                     updateBlockPosition(block);
-                 }
-             });
+            // 3. Generate new row data at the bottom (row 0)
+            const newRowBlockData = generateNewRowData(0);
 
-            // Generate the new bottom row (row 0)
-             generateNewRow(0);
+            // 4. Render the *new* blocks ONLY
+            newRowBlockData.forEach(renderBlock); // renderBlock now uses updateBlockVisualPosition
 
-             // Decrease rise interval
-             if (currentRiseInterval > MIN_RISE_INTERVAL) {
-                 currentRiseInterval -= RISE_INTERVAL_DECREMENT;
-                 currentRiseInterval = Math.max(currentRiseInterval, MIN_RISE_INTERVAL); // Clamp to minimum
+            // 5. Increase Rise Speed
+            if (currentRiseSpeed < MAX_RISE_SPEED) {
+                currentRiseSpeed += SPEED_INCREMENT_ON_COMMIT; // Increase speed per committed row
+                currentRiseSpeed = Math.min(currentRiseSpeed, MAX_RISE_SPEED);
+                // console.log("Rise speed increased to:", currentRiseSpeed.toFixed(2));
+            }
 
-                 // Reset the interval timer with the new duration
-                 clearInterval(riseIntervalId);
-                 riseIntervalId = setInterval(riseStack, currentRiseInterval);
-                 // console.log("New rise interval:", currentRiseInterval);
+            // 6. IMPORTANT: Immediately update visual 'top' for ALL blocks to reflect their NEW logical rows.
+            // The 'transform' offset is already handled, but the base 'top' needs adjustment.
+            // This prevents a visual jump when the riseOffset resets.
+            // updateAllBlockVisualPositions(); // This is now called in the main loop after commit check
+
+            // 7. Check for matches potentially caused by the new row or shifted blocks
+            // Avoid triggering if already processing from a previous action
+             if (!isProcessing) {
+                checkMatchesAndProcess();
+             } else {
+                 // console.log("CommitLogicalRise: Skipping match check, processing active.");
+             }
+        }
+
+
+        // Generates data only, adds to grid and blocks array, returns new block data
+        function generateNewRowData(targetRow) {
+             let newRowBlocks = [];
+             for (let c = 0; c < GRID_WIDTH; c++) {
+                 // Basic check to avoid instant vertical match with block above
+                 let type;
+                 let attempts = 0;
+                 do {
+                     type = Math.floor(Math.random() * BLOCK_TYPES);
+                     attempts++;
+                 } while (
+                     attempts < 10 && // Prevent infinite loop in rare cases
+                     targetRow > 0 &&
+                     grid[targetRow + 1]?.[c] !== null && // Check block directly above
+                     grid[targetRow + 1][c].type === type &&
+                     grid[targetRow + 1][c].state === 'idle' // Only avoid matching idle blocks
+                 );
+
+                 const id = nextBlockId++;
+                 const newBlock = {
+                     id: id,
+                     row: targetRow,
+                     col: c,
+                     type: type,
+                     element: null, // Will be created by renderBlock
+                     state: 'idle' // States: 'idle', 'swapping', 'flashing', 'clearing', 'falling'
+                 };
+                 grid[targetRow][c] = newBlock;
+                 blocks.push(newBlock);
+                 newRowBlocks.push(newBlock);
              }
 
-             // Important: Check for matches caused by the rise
-             checkMatchesAndProcess();
+             // Prevent instant horizontal matches on the new row itself
+             let requiresCheck = true;
+             let checkCount = 0; // Safety break
+             while (requiresCheck && checkCount < 5) {
+                 requiresCheck = false;
+                 checkCount++;
+                 for (let c = 0; c < GRID_WIDTH - (MIN_MATCH_LENGTH - 1); c++) {
+                     const firstBlock = grid[targetRow][c];
+                     if (!firstBlock) continue;
+                     let match = true;
+                     for (let i = 1; i < MIN_MATCH_LENGTH; i++) {
+                         if (!grid[targetRow][c + i] || grid[targetRow][c + i].type !== firstBlock.type) {
+                             match = false;
+                             break;
+                         }
+                     }
+                     if (match) {
+                         // Re-roll the type of the first block in the match
+                         const currentType = firstBlock.type;
+                         let newType;
+                         do {
+                             newType = Math.floor(Math.random() * BLOCK_TYPES);
+                         } while (newType === currentType); // Ensure it's a different type
+
+                         firstBlock.type = newType;
+                         // No need to update element class yet, renderBlock hasn't happened
+                         requiresCheck = true; // Re-check the row after change
+                         c = -1; // Restart check from the beginning of the row
+                     }
+                 }
+             }
+             return newRowBlocks; // Return the data for rendering
          }
 
 
         function swapBlocks(r, c1, c2) {
-             if (isGameOver || c1 < 0 || c1 >= GRID_WIDTH || c2 < 0 || c2 >= GRID_WIDTH || r < 0 || r >= GRID_HEIGHT) {
-                 return; // Invalid swap coordinates or game over
+             if (isGameOver || c1 < 0 || c1 >= GRID_WIDTH || c2 < 0 || c2 >= GRID_WIDTH || r < 0 || r >= GRID_HEIGHT + 1) { // Check includes buffer row? Let's limit swaps to visible grid.
+                 if (r >= GRID_HEIGHT) return; // Don't swap in buffer row or above
+                 return;
              }
+              if (isProcessing) {
+                  console.log("Cannot swap while processing matches/gravity.");
+                  return;
+              }
 
              const block1 = grid[r][c1];
              const block2 = grid[r][c2];
 
-             // Prevent swapping blocks that are currently clearing or falling (optional, but often desired)
-            // if ((block1 && (block1.state === 'clearing' || block1.state === 'falling')) ||
-            //     (block2 && (block2.state === 'clearing' || block2.state === 'falling'))) {
-            //     console.log("Cannot swap clearing/falling blocks.");
-            //     return;
-            // }
-            // Tetris Attack *allows* swapping flashing/clearing blocks, so we permit it.
+             // Prevent swapping blocks that are actively involved in clearing/falling?
+             // Tetris Attack allows swapping flashing blocks. Allow falling too? Be careful.
+             if ((block1 && (block1.state === 'clearing' /*|| block1.state === 'falling'*/)) ||
+                 (block2 && (block2.state === 'clearing' /*|| block2.state === 'falling'*/))) {
+                 console.log("Cannot swap clearing blocks.");
+                 return;
+             }
 
              console.log(`Swapping (${r},${c1}) and (${r},${c2})`);
 
@@ -464,13 +590,13 @@
              grid[r][c1] = block2;
              grid[r][c2] = block1;
 
-             // Update block objects' columns and elements
+             // --- Animation Start ---
              if (block1) {
                  block1.col = c2;
                  block1.state = 'swapping';
                  if (block1.element) {
                      block1.element.classList.add('swapping');
-                     updateBlockPosition(block1);
+                     updateBlockVisualPosition(block1); // Update left/top, transform will be reset by class/update func
                  }
              }
              if (block2) {
@@ -478,388 +604,52 @@
                  block2.state = 'swapping';
                  if (block2.element) {
                      block2.element.classList.add('swapping');
-                     updateBlockPosition(block2);
+                      updateBlockVisualPosition(block2); // Update left/top, transform will be reset by class/update func
                  }
              }
 
              playSound(swapSound);
+             isProcessing = true; // Prevent other actions during swap/fall/check
 
-             // After swap animation completes: Reset state, apply gravity, THEN check matches
+             // --- After swap animation ---
              setTimeout(() => {
-                 // --- Reset state first ---
+                 // Reset state
                  if (block1) {
-                     block1.state = 'idle'; // Assume idle, gravity check will correct if needed
+                     block1.state = 'idle';
                      if(block1.element) block1.element.classList.remove('swapping');
                  }
                  if (block2) {
-                     block2.state = 'idle'; // Assume idle
+                     block2.state = 'idle';
                      if(block2.element) block2.element.classList.remove('swapping');
                  }
 
-                 // --- Apply Gravity ---
-                 // applyGravity will check the entire board, including the columns
-                 // where the swap just occurred. If blocks need to fall, it handles
-                 // the falling animation and *then* calls checkMatchesAndProcess.
-                 // If no blocks fall, it proceeds directly to checkMatchesAndProcess (or just finishes).
-                 // console.log("Swap animation complete. Applying gravity check...");
-                 applyGravity(); // No 'onComplete' needed here, rely on its internal flow
+                  // Ensure visual positions are correct *after* removing 'swapping' class
+                  // and before gravity check.
+                 if(block1) updateBlockVisualPosition(block1);
+                 if(block2) updateBlockVisualPosition(block2);
 
-                 // --- DO NOT call checkMatchesAndProcess() here anymore ---
-                 checkMatchesAndProcess(); // <--- REMOVED
 
-             }, 80); // Match the .swapping transition duration (must be >= CSS)
+                 // Check gravity for the swapped blocks AND blocks above them
+                 applyGravity(() => {
+                     // After gravity settles (or if none needed), check for matches
+                     // `applyGravity` now handles releasing the isProcessing lock AFTER its chain completes
+                     checkMatchesAndProcess();
+                 });
+
+             }, SWAP_DURATION); // Match the .swapping transition duration
          }
 
 
          function checkMatchesAndProcess() {
-            if (isProcessing) {
-                // console.log("Already processing, queueing check");
-                // Basic queuing: set a flag to re-check later. A more robust queue might be needed.
-                // For simplicity here, we rely on the fact that processes (clear, fall) will
-                // eventually call this function again.
-                return;
+            if (isProcessing && !activeClearPromises.length) { // Allow checking if processing is only due to pending clears
+                 // console.log("Queueing check: Already processing.");
+                 return; // Avoid concurrent processing unless it's just waiting for clears
             }
-
-            isProcessing = true; // Mark start of processing cycle
-            // console.log("Checking for matches...");
-
-            const matches = findMatches();
-
-            if (matches.length > 0) {
-                // console.log(`Found ${matches.length} blocks in matches.`);
-                currentChain++;
-                updateChainDisplay();
-
-                let pointsEarned = 0;
-                let basePointsPerBlock = 10;
-                let comboBonus = 0;
-
-                // Calculate points and identify unique blocks to flash/clear
-                 const uniqueBlocksToClear = new Set();
-                 matches.forEach(matchList => {
-                     matchList.forEach(block => uniqueBlocksToClear.add(block));
-                     if (matchList.length > MIN_MATCH_LENGTH) { // Combo bonus for 4+
-                         comboBonus += (matchList.length - MIN_MATCH_LENGTH) * 5; // Example bonus
-                     }
-                 });
-
-                 pointsEarned = uniqueBlocksToClear.size * basePointsPerBlock + comboBonus;
-                 let chainMultiplier = currentChain > 1 ? currentChain : 1; // Apply chain multiplier (x2 for 2nd chain, etc.)
-                 pointsEarned *= chainMultiplier;
-
-                 score += pointsEarned;
-                 updateScoreDisplay();
-
-                 // Start the two-phase clearing process
-                 initiateClearing(Array.from(uniqueBlocksToClear));
-
-            } else {
-                // No matches found, end the chain
-                // console.log("No matches found.");
-                if (currentChain > 0) {
-                    console.log(`Chain ended at x${currentChain}`);
-                }
-                currentChain = 0;
-                updateChainDisplay();
-                isProcessing = false; // Release processing lock if no matches
+            // Check for Game Over condition (blocks stacked too high and stable) BEFORE finding matches
+            if (checkGameOverCondition()) {
+                triggerGameOver(`Stable block detected in buffer row before match check.`);
+                return; // Stop processing on game over
             }
-        }
-
-        function findMatches() {
-            const allMatches = []; // Array of arrays, each inner array is a match group
-            const checkedBlocks = new Set(); // Keep track of blocks already part of a found match
-
-            for (let r = 0; r < GRID_HEIGHT; r++) {
-                for (let c = 0; c < GRID_WIDTH; c++) {
-                    const block = grid[r][c];
-                    if (!block || block.state !== 'idle' || checkedBlocks.has(block.id)) {
-                        continue; // Skip empty cells, non-idle blocks, or already checked blocks
-                    }
-
-                    const blockType = block.type;
-
-                    // Check Horizontal
-                    let horizontalMatch = [block];
-                    for (let nc = c + 1; nc < GRID_WIDTH; nc++) {
-                        const nextBlock = grid[r][nc];
-                        if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === blockType) {
-                            horizontalMatch.push(nextBlock);
-                        } else {
-                            break;
-                        }
-                    }
-                    if (horizontalMatch.length >= MIN_MATCH_LENGTH) {
-                        allMatches.push(horizontalMatch);
-                        horizontalMatch.forEach(b => checkedBlocks.add(b.id));
-                    }
-
-                    // Check Vertical (only if not already part of a horizontal match starting here)
-                    // We still need this check even if block is in checkedBlocks from a horizontal match
-                    // originating elsewhere, but we avoid starting a *new* check from an already matched block.
-                    if (!checkedBlocks.has(block.id)) { // Avoid re-checking start of vertical if already in horizontal
-                         let verticalMatch = [block]; // Start fresh check
-                         for (let nr = r + 1; nr < GRID_HEIGHT; nr++) {
-                            const nextBlock = grid[nr][c];
-                            if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === blockType) {
-                                verticalMatch.push(nextBlock);
-                            } else {
-                                break;
-                            }
-                         }
-                         if (verticalMatch.length >= MIN_MATCH_LENGTH) {
-                            // Add only blocks not already counted in *any* previous match
-                            const newVerticalBlocks = verticalMatch.filter(b => !checkedBlocks.has(b.id));
-                            if (newVerticalBlocks.length > 0) {
-                                // Check if this forms a valid match *on its own* or extends significantly
-                                // A simple approach: If the total vertical match is long enough, add it.
-                                // Refined: Add the *entire* match group, duplicates will be handled by Set later.
-                                allMatches.push(verticalMatch);
-                                verticalMatch.forEach(b => checkedBlocks.add(b.id)); // Mark all as checked
-                            }
-                        }
-                    }
-                }
-            }
-            return allMatches; // Returns array of match groups (arrays of block objects)
-        }
-
-        function initiateClearing(blocksToProcess) {
-            // Prevent processing null/undefined blocks often caused by race conditions
-            const validBlocksToClear = blocksToProcess.filter(b => b && b.element && grid[b.row]?.[b.col]?.id === b.id);
-
-            if (validBlocksToClear.length === 0) {
-                 // console.log("Initiate Clearing called with no valid blocks.");
-                 // If called during a chain, gravity might still need to run if prior clears happened
-                 // But if called initially with no matches, processing should stop.
-                 // Let applyGravity handle the final check/processing release.
-                 applyGravity(() => {
-                    // This is the final step if no clearing actually happened
-                    isProcessing = false;
-                    // Check if chain needs reset *here* if nothing cleared/fell
-                    if(currentChain > 0 && !findMatches().length) {
-                        // console.log("Chain ended (no valid blocks cleared).")
-                        currentChain = 0;
-                        updateChainDisplay();
-                    }
-                 });
-                 return; // Nothing to clear in this specific batch
-             }
-
-            console.log(`Initiating clear for ${validBlocksToClear.length} blocks. Chain: ${currentChain}`);
-
-            // Phase 1: Mark and Flash
-            validBlocksToClear.forEach(block => {
-                if (block.state !== 'flashing' && block.state !== 'clearing') {
-                     block.state = 'flashing';
-                     block.element.classList.add('flashing');
-                } else {
-                    console.warn(`Block ${block.id} was already ${block.state}, skipping flash.`);
-                }
-            });
-
-             // Create a promise that resolves after clearing is fully done (including fall and next check)
-            const clearPromise = new Promise(resolve => {
-                // Phase 2: Staggered Removal after Flash Delay
-                setTimeout(() => {
-                    // Sort blocks for consistent removal (e.g., bottom-up, left-right)
-                    const sortedBlocks = [...validBlocksToClear].sort((a, b) => {
-                        if (a.row !== b.row) return a.row - b.row;
-                        return a.col - b.col;
-                    });
-
-                    removeBlocksSequentially(sortedBlocks, resolve); // Pass resolve function
-
-                }, FLASH_DURATION);
-            });
-
-             activeClearPromises.push(clearPromise);
-             clearPromise.then(() => {
-                // Remove this promise from the active list once it's fully resolved
-                activeClearPromises = activeClearPromises.filter(p => p !== clearPromise);
-                 // If no other clears are running, mark processing as potentially finished
-                 // The final 'isProcessing = false' is now handled after gravity check
-                 // if (activeClearPromises.length === 0) {
-                 //    isProcessing = false;
-                 // }
-             }).catch(err => {
-                 console.error("Error during clearing process:", err);
-                 // Handle potential errors, maybe force reset isProcessing
-                 activeClearPromises = activeClearPromises.filter(p => p !== clearPromise);
-                 isProcessing = false; // Force release processing lock on error
-             });
-         }
-
-
-        function removeBlocksSequentially(blocksToRemove, onComplete) {
-            // Base case moved to the end of the function
-
-            const block = blocksToRemove.shift(); // Get the next block to remove
-
-            if (block) {
-                 // Double check block state and grid position before removal
-                 const gridBlock = grid[block.row]?.[block.col];
-                 if(gridBlock && gridBlock.id === block.id && (block.state === 'flashing' || block.state === 'clearing')) {
-                    // console.log(`Removing block ${block.id} at (${block.row}, ${block.col})`);
-                    block.state = 'clearing'; // Ensure state is clearing
-                    if (block.element) {
-                        block.element.classList.remove('flashing');
-                        block.element.style.transition = 'transform 0.1s ease-in, opacity 0.1s ease-in'; // Vanish animation
-                        block.element.style.transform = 'scale(0)';
-                        block.element.style.opacity = '0';
-
-                        // Remove from DOM after animation
-                        setTimeout(() => {
-                            block.element.remove();
-                        }, 100); // Match vanish animation time
-                    }
-
-                    // Remove from main blocks array
-                    const blockIndex = blocks.findIndex(b => b.id === block.id);
-                    if (blockIndex > -1) {
-                        blocks.splice(blockIndex, 1);
-                    }
-
-                    // Nullify in grid model immediately
-                    grid[block.row][block.col] = null;
-
-                    playSound(clearSound);
-                 } else {
-                     console.warn(`Skipping removal of block ${block.id}: Not found in grid or state changed unexpectedly. Current state: ${block.state}, Grid contains: ${gridBlock?.id}`);
-                 }
-
-            } else {
-                 console.warn("Tried to remove invalid block entry (null/undefined).");
-            }
-
-
-            if (blocksToRemove.length === 0) {
-                // All blocks in this batch removed, trigger gravity
-                 // console.log("Sequential removal complete, applying gravity...");
-                 // Use requestAnimationFrame to ensure DOM updates (removals) are flushed before gravity calc
-                 requestAnimationFrame(() => {
-                     applyGravity(onComplete); // Pass the resolver function
-                 });
-                 return; // End recursion/sequence here
-             } else {
-                // Schedule the next removal
-                setTimeout(() => removeBlocksSequentially(blocksToRemove, onComplete), INDIVIDUAL_REMOVE_DELAY);
-            }
-        }
-
-
-         function applyGravity(onComplete) {
-             // console.log("Applying gravity...");
-             let blocksFell = false;
-             let fallingBlockPromises = []; // Keep track of falling animations if needed
-
-             // Use the robust readRow/writeRow logic
-             for (let c = 0; c < GRID_WIDTH; c++) {
-                let writeRow = 0; // Start from the bottom row for writing settled blocks
-                for (let readRow = 0; readRow < GRID_HEIGHT; readRow++) {
-                    const block = grid[readRow][c];
-                    if (block !== null) {
-                        // Found a block. If its readRow is above its destined writeRow, it needs to fall.
-                        if (readRow !== writeRow) {
-                            // console.log(`Block ${block.id} at (${readRow}, ${c}) falling to (${writeRow}, ${c})`);
-
-                            // Check if the block is already clearing (shouldn't happen ideally, but safety check)
-                            if (block.state === 'clearing' || block.state === 'flashing') {
-                                console.warn(`Block ${block.id} trying to fall while in state ${block.state}. Skipping fall.`);
-                                // Don't move it, leave the grid inconsistent? Or nullify readRow?
-                                // Best: ensure clearing blocks are fully removed *before* gravity.
-                                // The requestAnimationFrame in removeBlocksSequentially helps.
-                                // If it still happens, nullify the original spot and log error.
-                                grid[readRow][c] = null;
-                                continue; // Skip processing this potentially problematic block for falling
-                            }
-
-
-                            grid[writeRow][c] = block; // Move block pointer in grid model
-                            grid[readRow][c] = null;   // Clear original spot in grid model
-
-                            block.row = writeRow;     // Update block object's row property
-                            block.state = 'falling';
-
-                            if(block.element) {
-                                block.element.classList.add('falling');
-                                // updateBlockPosition triggers the CSS transition to the new 'top' value
-                                updateBlockPosition(block);
-                                blocksFell = true;
-
-                                // Optional: Create a promise for each falling animation if precise timing needed later
-                                // fallingBlockPromises.push(new Promise(resolve => setTimeout(resolve, FALL_DURATION)));
-                            } else {
-                                console.warn(`Block ${block.id} is missing its element during gravity.`);
-                            }
-                        }
-                        writeRow++; // Increment writeRow, this is where the *next* block above should land
-                    }
-                }
-            } // End column loop
-
-             if (blocksFell) {
-                 // Wait for falling animation to complete before checking for new matches
-                 setTimeout(() => {
-                     // Reset state of fallen blocks *after* animation
-                     blocks.forEach(block => {
-                         if (block && block.state === 'falling') {
-                             block.state = 'idle';
-                              if(block.element) {
-                                  block.element.classList.remove('falling');
-                                  // Ensure final position is pixel-perfect after transition
-                                  updateBlockPosition(block);
-                              }
-                         }
-                     });
-                     // console.log("Gravity settled, checking for chain matches...");
-                     isProcessing = false; // Release lock *before* next check
-                     checkMatchesAndProcess(); // Check for new matches (chain reaction)
-                     if (onComplete) onComplete(); // Resolve the promise from initiateClearing
-                 }, FALL_DURATION); // Wait duration matching CSS transition
-             } else {
-                 // No blocks fell, process is complete for this cycle
-                 // console.log("Gravity applied, no blocks fell.");
-                 isProcessing = false; // Release processing lock
-                 if (onComplete) onComplete(); // Resolve the promise
-
-                  // If nothing fell and no matches were found initially, the chain ends here.
-                  // Check if the chain *should* end.
-                  if (currentChain > 0) {
-                       // Perform a final check to see if any matches exist *now*
-                       const finalMatches = findMatches();
-                       if(finalMatches.length === 0) {
-                            // console.log(`Chain ended at x${currentChain} after gravity (no blocks fell).`);
-                            currentChain = 0;
-                            updateChainDisplay();
-                       } else {
-                            // This case should theoretically be caught by the checkMatchesAndProcess above,
-                            // but as a fallback, ensure processing restarts if matches were somehow missed.
-                            console.warn("Matches found after gravity settle, but blocksFell was false? Re-initiating check.");
-                            checkMatchesAndProcess();
-                       }
-                  }
-             }
-         }
-
-        // Ensure checkMatchesAndProcess sets isProcessing correctly
-        function checkMatchesAndProcess() {
-            if (isProcessing) {
-                // console.log("Queueing check: Already processing.");
-                return; // Avoid concurrent processing
-            }
-
-            // Check for Game Over condition (blocks stacked too high and stable)
-            for (let c = 0; c < GRID_WIDTH; c++) {
-                 // Check the buffer row (GRID_HEIGHT)
-                if (grid[GRID_HEIGHT]?.[c] !== null && grid[GRID_HEIGHT][c].state !== 'clearing' && grid[GRID_HEIGHT][c].state !== 'flashing') {
-                    // Allow a brief moment for things to potentially clear
-                    // A block being *in* the buffer row isn't instant death, but being *pushed* from there is.
-                    // The check in riseStack handles the push, this handles stable blocks too high.
-                    triggerGameOver(`Stable block detected in buffer row (${GRID_HEIGHT}, ${c})`);
-                    return; // Stop processing on game over
-                }
-            }
-
 
             isProcessing = true; // Mark start of processing cycle
             // console.log("Checking for matches...");
@@ -882,7 +672,6 @@
                          if (block && block.state === 'idle') { // Only add idle blocks to the clear set
                              uniqueBlocksToClear.add(block);
                          } else if (block && (block.state === 'falling' || block.state === 'swapping')) {
-                              // Log if we found a match involving a non-idle block (shouldn't happen with current findMatches)
                              console.warn(`Match found involving block ${block.id} in state ${block.state}`);
                          }
                      });
@@ -892,10 +681,8 @@
                  });
 
                  if (uniqueBlocksToClear.size === 0) {
-                     // Matches were found, but involved non-idle blocks only?
-                     console.warn("Matches array was not empty, but uniqueBlocksToClear is empty. Match involved non-idle blocks?");
+                     console.warn("Matches array non-empty, but uniqueBlocksToClear is empty. Match involved non-idle blocks?");
                      isProcessing = false; // Release lock, nothing to clear this cycle
-                     // Potentially reset chain if this state persists?
                      return;
                  }
 
@@ -904,8 +691,7 @@
                  updateScoreDisplay();
 
                  // Start the two-phase clearing process
-                 // Pass only the valid, unique, idle blocks
-                 initiateClearing(Array.from(uniqueBlocksToClear));
+                 initiateClearing(Array.from(uniqueBlocksToClear)); // initiateClearing now handles its own promise chain
 
             } else {
                 // No matches found among idle blocks
@@ -921,27 +707,303 @@
         }
 
 
+        function findMatches() {
+            const allMatches = [];
+            const checkedBlocks = new Set();
+
+            // Iterate up to GRID_HEIGHT, buffer row doesn't participate in matching
+            for (let r = 0; r < GRID_HEIGHT; r++) {
+                for (let c = 0; c < GRID_WIDTH; c++) {
+                    const block = grid[r][c];
+                    // Only consider IDLE blocks for initiating a match search
+                    if (!block || block.state !== 'idle' || checkedBlocks.has(block.id)) {
+                        continue;
+                    }
+
+                    const blockType = block.type;
+
+                    // Check Horizontal
+                    let horizontalMatch = [block];
+                    for (let nc = c + 1; nc < GRID_WIDTH; nc++) {
+                        const nextBlock = grid[r][nc];
+                        // Match blocks even if they are flashing/falling? Tetris Attack allows this.
+                        // Let's stick to matching IDLE blocks for now to avoid complexity.
+                        // If allowing non-idle: change state check here.
+                        if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === blockType) {
+                            horizontalMatch.push(nextBlock);
+                        } else {
+                            break;
+                        }
+                    }
+                    if (horizontalMatch.length >= MIN_MATCH_LENGTH) {
+                        allMatches.push(horizontalMatch);
+                        horizontalMatch.forEach(b => checkedBlocks.add(b.id));
+                    }
+
+                    // Check Vertical (only start check from a block not already in a horizontal match)
+                     if (!checkedBlocks.has(block.id)) {
+                         let verticalMatch = [block]; // Start fresh check
+                         // Iterate up to GRID_HEIGHT
+                         for (let nr = r + 1; nr < GRID_HEIGHT; nr++) {
+                            const nextBlock = grid[nr][c];
+                             if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === blockType) {
+                                verticalMatch.push(nextBlock);
+                            } else {
+                                break;
+                            }
+                         }
+                         if (verticalMatch.length >= MIN_MATCH_LENGTH) {
+                            allMatches.push(verticalMatch);
+                            // Mark all in this vertical match as checked to avoid redundant checks
+                            verticalMatch.forEach(b => checkedBlocks.add(b.id));
+                        }
+                    }
+                }
+            }
+            // Filter out duplicates across horizontal/vertical groups if necessary
+            // For now, initiateClearing uses a Set, handling duplicates naturally.
+            return allMatches;
+        }
+
+       function initiateClearing(blocksToProcess) {
+             // Filter for valid blocks that are still in the grid at their expected location
+             const validBlocksToClear = blocksToProcess.filter(b => {
+                 return b && b.element && grid[b.row]?.[b.col]?.id === b.id && b.state === 'idle';
+             });
+
+             if (validBlocksToClear.length === 0) {
+                 // console.log("Initiate Clearing called with no valid idle blocks.");
+                 // If no blocks are cleared, gravity check might still be needed if called mid-chain,
+                 // but the 'isProcessing' lock should be released eventually.
+                 // We rely on the chain: Check -> Clear -> Fall -> Check -> ...
+                 // If this step has nothing to clear, the next Fall check will release the lock if needed.
+                 applyGravity(() => {
+                      // This callback might run if gravity was needed for other reasons.
+                      // Ensure processing eventually stops if nothing happened.
+                      if (!findMatches().length) { // Double check after potential gravity
+                          isProcessing = false;
+                            if (currentChain > 0) {
+                                // console.log("Chain ended (no valid blocks cleared/fell).")
+                                currentChain = 0;
+                                updateChainDisplay();
+                            }
+                      } else {
+                          // Matches found AFTER gravity? Restart check.
+                           // isProcessing should already be false here if applyGravity completed.
+                           checkMatchesAndProcess();
+                      }
+
+                 });
+                 return;
+             }
+
+             console.log(`Initiating clear for ${validBlocksToClear.length} blocks. Chain: ${currentChain}`);
+             playSound(clearSound); // Play sound once per clear group start
+
+             // Phase 1: Mark and Flash
+             validBlocksToClear.forEach(block => {
+                 block.state = 'flashing';
+                 block.element.classList.add('flashing');
+                 // Ensure rise transform doesn't interfere?
+                 // updateBlockVisualPosition(block); // Re-apply visual position might reset flash animation? Test this.
+                 // Let's assume CSS animation handles transform correctly.
+             });
+
+             const clearPromise = new Promise(resolve => {
+                 // Phase 2: Staggered Removal after Flash Delay
+                 setTimeout(() => {
+                     const sortedBlocks = [...validBlocksToClear].sort((a, b) => {
+                         if (a.row !== b.row) return a.row - b.row;
+                         return a.col - b.col;
+                     });
+                     removeBlocksSequentially(sortedBlocks, resolve); // Pass the resolve function
+                 }, FLASH_DURATION);
+             });
+
+             activeClearPromises.push(clearPromise);
+
+             clearPromise.then(() => {
+                 // This specific clear batch (including its gravity check) is done.
+                 activeClearPromises = activeClearPromises.filter(p => p !== clearPromise);
+                  // Crucially, don't set isProcessing = false here. The gravity check inside
+                  // removeBlocksSequentially -> applyGravity handles the next step or releasing the lock.
+                  // console.log(`Clear promise resolved. ${activeClearPromises.length} remaining.`);
+             }).catch(err => {
+                 console.error("Error during clearing process:", err);
+                 activeClearPromises = activeClearPromises.filter(p => p !== clearPromise);
+                 isProcessing = false; // Force release lock on error
+             });
+         }
+
+
+        function removeBlocksSequentially(blocksToRemove, onComplete) {
+            const block = blocksToRemove.shift();
+
+            if (block) {
+                 const gridBlock = grid[block.row]?.[block.col];
+                 // Only remove if it's still the correct block and in a clearing state
+                 if(gridBlock && gridBlock.id === block.id && (block.state === 'flashing' || block.state === 'clearing')) {
+                    block.state = 'clearing'; // Ensure state
+                    if (block.element) {
+                        block.element.classList.remove('flashing');
+                        // Vanish animation (using opacity and maybe scale via CSS transition)
+                        block.element.style.opacity = '0';
+                        // Optional: scale down
+                        // block.element.style.transform = 'scale(0)'; // Careful: conflicts with rise transform
+
+                        // Remove from DOM after animation
+                        setTimeout(() => {
+                            block.element.remove();
+                        }, 100); // Match vanish animation time (opacity transition)
+                    }
+
+                    // Remove from main blocks array
+                    const blockIndex = blocks.findIndex(b => b.id === block.id);
+                    if (blockIndex > -1) {
+                        blocks.splice(blockIndex, 1);
+                    } else {
+                         console.warn(`Block ${block.id} not found in blocks array during removal.`);
+                    }
+
+                    // Nullify in grid model immediately
+                    grid[block.row][block.col] = null;
+
+                    // playSound(clearSound); // Moved sound to initiateClearing start
+
+                 } else {
+                     console.warn(`Skipping removal of block ${block.id}: Grid mismatch or state changed. State: ${block.state}, Grid: ${gridBlock?.id}`);
+                 }
+            }
+
+            if (blocksToRemove.length === 0) {
+                // All blocks in this batch removed, trigger gravity
+                // Use rAF to ensure DOM updates are processed before gravity logic
+                requestAnimationFrame(() => {
+                     applyGravity(onComplete); // Pass the resolver for the main clear promise
+                 });
+                 return; // End recursion/sequence here
+             } else {
+                // Schedule the next removal
+                setTimeout(() => removeBlocksSequentially(blocksToRemove, onComplete), INDIVIDUAL_REMOVE_DELAY);
+            }
+        }
+
+
+         function applyGravity(onComplete) {
+             // console.log("Applying gravity...");
+             let blocksFell = false;
+
+             // Iterate bottom-up for each column to handle falling
+             for (let c = 0; c < GRID_WIDTH; c++) {
+                let writeRow = 0; // Start checking from the bottom row
+                // Iterate up to GRID_HEIGHT, buffer row doesn't have gravity applied *to* it
+                for (let readRow = 0; readRow < GRID_HEIGHT; readRow++) {
+                    const block = grid[readRow][c];
+                    if (block !== null) {
+                         // Block exists. If its readRow is above its destined writeRow, it needs to fall.
+                         if (readRow > writeRow) {
+                              // Check if block is clearing - should not happen if logic is correct, but safety first
+                             if (block.state === 'clearing' || block.state === 'flashing') {
+                                 console.warn(`Block ${block.id} trying to fall while ${block.state}. Skipping fall.`);
+                                 // Leave the space empty, block removal handled elsewhere.
+                                 grid[readRow][c] = null;
+                                 continue; // Don't move it, check next block above
+                             }
+
+                             // console.log(`Block ${block.id} at (${readRow}, ${c}) falling to (${writeRow}, ${c})`);
+                             blocksFell = true;
+                             grid[writeRow][c] = block;   // Move block pointer in grid model
+                             grid[readRow][c] = null;     // Clear original spot in grid model
+
+                             block.row = writeRow;       // Update block object's row property
+                             block.state = 'falling';
+
+                             if(block.element) {
+                                 block.element.classList.add('falling');
+                                 // Update visual position - CSS transition on 'top' will handle the animation
+                                 // The 'transform' for rise offset is disabled by the 'falling' class style rule
+                                 updateBlockVisualPosition(block);
+                             } else {
+                                 console.warn(`Block ${block.id} is missing its element during gravity.`);
+                             }
+                         }
+                         writeRow++; // Increment writeRow, this is where the *next* block above should land or stay
+                     }
+                 }
+             } // End column loop
+
+             if (blocksFell) {
+                 // Wait for falling animation to complete
+                 setTimeout(() => {
+                     // Reset state of fallen blocks *after* animation
+                     blocks.forEach(block => {
+                         if (block && block.state === 'falling') {
+                             block.state = 'idle';
+                             if(block.element) {
+                                 block.element.classList.remove('falling');
+                                 // Ensure final position is correct, including re-enabling rise transform
+                                 updateBlockVisualPosition(block);
+                             }
+                         }
+                     });
+                     // console.log("Gravity settled, checking for chain matches...");
+                     // Release processing lock *before* next check. If matches found, it will be re-acquired.
+                     isProcessing = false;
+                     checkMatchesAndProcess(); // Check for new matches (chain reaction)
+                     if (onComplete) onComplete(); // Resolve the promise from initiateClearing
+                 }, FALL_DURATION); // Wait duration matching CSS transition
+             } else {
+                 // No blocks fell, process is complete for this cycle
+                 // console.log("Gravity applied, no blocks fell.");
+                 let matchesExist = false;
+                 if(currentChain > 0) {
+                     matchesExist = findMatches().length > 0;
+                     if (!matchesExist) {
+                        // console.log(`Chain ended at x${currentChain} after gravity (no blocks fell).`);
+                         currentChain = 0;
+                         updateChainDisplay();
+                     }
+                 }
+
+                 // Release processing lock ONLY if no further matches are found
+                 if(!matchesExist) {
+                    isProcessing = false;
+                 }
+                 if (onComplete) onComplete(); // Resolve the promise
+
+                 // If matches *do* exist, trigger the next check immediately
+                  if (matchesExist) {
+                      // console.log("Matches found after gravity (no fall), re-checking.");
+                       checkMatchesAndProcess();
+                  }
+             }
+         }
+
 
         function triggerGameOver(reason) {
             if (isGameOver) return; // Prevent multiple triggers
             console.error("Game Over:", reason);
             isGameOver = true;
-            clearInterval(riseIntervalId);
-            riseIntervalId = null;
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            activeClearPromises = []; // Clear any pending clear operations
 
-            // Stop any ongoing animations/timeouts? Maybe not necessary if checks handle isGameOver.
+            // Stop processing flag
+            isProcessing = true; // Prevent any further game logic execution
 
             playSound(gameOverSound);
 
             finalScoreElement.textContent = `Final Score: ${score}`;
             gameOverOverlay.style.display = 'flex';
 
-             // Stop flashing/falling visuals
+             // Stop flashing/falling visuals immediately
             blocks.forEach(b => {
                  if (b.element) {
                      b.element.classList.remove('flashing', 'falling', 'swapping');
-                     b.element.style.animation = 'none'; // Stop flashing animation
-                     // Optionally add a 'game-over-block' style
+                     b.element.style.animation = 'none';
+                     b.element.style.transition = 'none'; // Stop ongoing transitions
+                     // Optionally force final position if needed
+                     updateBlockVisualPosition(b);
                  }
             });
              cursorElement.style.display = 'none'; // Hide cursor
@@ -949,74 +1011,99 @@
 
         // --- Input Handling ---
         function handleKeyDown(event) {
-            if (isGameOver) {
-                 // Allow Enter key to restart on game over screen
-                 if (event.key === 'Enter' && gameOverOverlay.style.display === 'flex') {
-                     initGame();
-                 }
-                 return;
-             }
+             // Handle start/restart universally
              if (startOverlay.style.display === 'flex') {
-                  // Allow Enter or Space to start from start screen
                   if (event.key === 'Enter' || event.key === ' ') {
-                      audioContextAllowed = true; // Enable audio on first interaction
+                      event.preventDefault();
+                      audioContextAllowed = true;
                       initGame();
                   }
                   return;
              }
+             if (gameOverOverlay.style.display === 'flex') {
+                 if (event.key === 'Enter') {
+                     event.preventDefault();
+                     initGame();
+                 }
+                 return;
+             }
+
+             // Ignore input if game over state is reached but overlay not yet shown (rare case)
+             if (isGameOver) return;
+
+             // Ignore input during block processing (swap, clear, fall)
+             if (isProcessing) {
+                 console.log("Input ignored: Processing active.");
+                 return;
+             }
 
 
             let moved = false;
+            let newRow = cursor.row;
+            let newCol = cursor.col;
+
             switch (event.key) {
                 case 'ArrowLeft':
                     if (cursor.col > 0) {
-                        cursor.col--;
+                        newCol--;
                         moved = true;
                     }
                     break;
                 case 'ArrowRight':
                     if (cursor.col < GRID_WIDTH - 2) { // Cursor is 2 wide
-                        cursor.col++;
+                        newCol++;
                         moved = true;
                     }
                     break;
                 case 'ArrowUp':
+                    // Allow cursor up to the top visible row, but not into buffer visually
                     if (cursor.row < GRID_HEIGHT - 1) {
-                        cursor.row++;
+                        newRow++;
                         moved = true;
                     }
                     break;
                 case 'ArrowDown':
                     if (cursor.row > 0) {
-                        cursor.row--;
+                        newRow--;
                         moved = true;
                     }
                     break;
                 case ' ': // Spacebar
                 case 'x': // 'X' key
                 case 'X':
+                    event.preventDefault();
                     swapBlocks(cursor.row, cursor.col, cursor.col + 1);
-                    // Note: checkMatchesAndProcess is called *after* swap animation completes
+                    // Note: checkMatchesAndProcess is called *after* swap animation & gravity
                     break;
-                 case 'p': // DEBUG: Pause/Resume Rise Timer
-                     if(riseIntervalId) {
-                         clearInterval(riseIntervalId);
-                         riseIntervalId = null;
-                         console.log("Paused Rise");
-                     } else {
-                         riseIntervalId = setInterval(riseStack, currentRiseInterval);
-                         console.log("Resumed Rise");
+                 // DEBUG Keys (Optional)
+                 /*
+                 case 'p': // Pause/Resume Animation Loop
+                     if(animationFrameId) {
+                         cancelAnimationFrame(animationFrameId);
+                         animationFrameId = null;
+                         console.log("Paused Animation");
+                     } else if (!isGameOver) {
+                         startGameLoop();
+                         console.log("Resumed Animation");
                      }
                      break;
-                case 'r': // DEBUG: Force Rise
-                     console.log("Forcing Rise + Match Check");
-                     riseStack();
-                     break;
-
+                 case 'r': // Force Commit Logical Rise (for testing)
+                      if (!isProcessing) {
+                           console.log("Forcing Logical Rise Commit");
+                           commitLogicalRise();
+                           updateAllBlockVisualPositions(); // Ensure visuals update immediately
+                           // checkMatchesAndProcess(); // commitLogicalRise already calls this
+                      } else {
+                           console.log("Cannot force rise while processing.");
+                      }
+                      break;
+                */
             }
 
             if (moved) {
-                renderCursor();
+                 cursor.row = newRow;
+                 cursor.col = newCol;
+                 renderCursor(); // Update cursor position immediately
             }
 
             // Prevent arrow keys/space from scrolling the page
@@ -1030,96 +1117,94 @@
         document.addEventListener('keydown', handleKeyDown);
 
         restartButton.addEventListener('click', () => {
-            gameOverOverlay.style.display = 'none'; // Hide overlay immediately
-             initGame();
+            // No need to hide overlay, initGame does it
+            initGame();
         });
 
         startButton.addEventListener('click', () => {
-             audioContextAllowed = true; // Enable audio context on user interaction
-             // Preload sounds slightly?
-             swapSound.load();
+             audioContextAllowed = true;
+             swapSound.load(); // Preload attempt
              clearSound.load();
              gameOverSound.load();
-
              initGame();
         });
 
-        // --- Initial Setup ---
-        // Don't initGame() automatically, wait for start button.
-        // Display the start overlay initially.
-        startOverlay.style.display = 'flex';
-        cursorElement.style.display = 'none'; // Hide cursor until game starts
-
-
-        // --- Touch/Mouse Controls (Basic Example - Tap to Swap) ---
+        // --- Touch/Mouse Controls ---
+        // Basic Tap-to-Move-Cursor and Tap-Pair-to-Swap
         let firstTap = null;
         gameBoard.addEventListener('click', (event) => {
-            if (isGameOver || startOverlay.style.display === 'flex') return;
-             if (!audioContextAllowed) { // Also treat click as interaction to enable audio
+            if (isGameOver || startOverlay.style.display === 'flex' || isProcessing) return;
+            if (!audioContextAllowed) {
                 audioContextAllowed = true;
-                swapSound.load();
-                clearSound.load();
-                gameOverSound.load();
+                swapSound.load(); clearSound.load(); gameOverSound.load();
             }
 
             const rect = gameBoard.getBoundingClientRect();
             const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
+            // Adjust Y coord based on current rise offset
+            const y = event.clientY - rect.top + riseOffset;
 
             const col = Math.floor(x / BLOCK_SIZE);
+            // Calculate logical row based on adjusted Y
             const row = VISIBLE_GRID_HEIGHT - 1 - Math.floor(y / BLOCK_SIZE);
 
-             if (col < 0 || col >= GRID_WIDTH || row < 0 || row >= GRID_HEIGHT) return; // Click outside grid
 
-             // Move cursor to the clicked cell (left side of pair)
-            cursor.row = row;
-            cursor.col = Math.min(col, GRID_WIDTH - 2); // Ensure cursor doesn't go out of bounds right
-            renderCursor();
+             if (col < 0 || col >= GRID_WIDTH || row < 0 || row >= GRID_HEIGHT) return; // Click outside logical grid
 
-            // Simple Swap Logic: Tap adjacent blocks to swap
-            if (!firstTap) {
-                // First tap: Store location
+             // --- Simple Tap-to-Swap Logic ---
+             // If tap is on the block pair currently under the cursor, perform swap
+             if (row === cursor.row && (col === cursor.col || col === cursor.col + 1)) {
+                 console.log("Tapped cursor location - swapping");
+                 swapBlocks(cursor.row, cursor.col, cursor.col + 1);
+                 firstTap = null; // Clear any previous tap sequence
+             }
+             // Otherwise, move the cursor to the tapped location
+             else {
+                 console.log(`Tapped: (${row}, ${col}). Moving cursor.`);
+                 cursor.row = row;
+                 // Ensure cursor's left edge (col) doesn't go beyond second-to-last column
+                 cursor.col = Math.min(col, GRID_WIDTH - 2);
+                 renderCursor();
+                 firstTap = null; // Clear any previous tap sequence on move
+             }
+
+             /* // --- Alternative: Two-Tap Swap Logic (More Complex) ---
+             if (!firstTap) {
                  firstTap = { row, col };
-                 // Highlight somehow? (optional)
                  console.log("First tap:", firstTap);
+                 // Optional: Highlight first tap? Needs element access.
+                 // Move cursor to selection
+                  cursor.row = row;
+                  cursor.col = Math.min(col, GRID_WIDTH - 2);
+                  renderCursor();
+
              } else {
-                 // Second tap: Check adjacency and swap
                  const dr = Math.abs(row - firstTap.row);
                  const dc = Math.abs(col - firstTap.col);
 
                  if (dr === 0 && dc === 1) { // Horizontally adjacent
-                     // Ensure the swap happens at the correct row
+                     console.log("Second tap adjacent horizontally - swapping");
+                     // Ensure correct order for swap function
                      swapBlocks(row, Math.min(firstTap.col, col), Math.max(firstTap.col, col));
                      firstTap = null; // Reset tap
-                 } else if (dc === 0 && dr === 1) { // Vertically adjacent (Disallow vertical swaps usually)
-                     console.log("Vertical swaps not allowed.");
-                      // If you wanted vertical swaps, implement logic here.
-                      firstTap = { row, col }; // Treat as new first tap
-                 }
-                 else {
-                     // Not adjacent, treat as new first tap
-                     console.log("Tapped non-adjacent block. Resetting first tap.");
-                     firstTap = { row, col };
+                 } else {
+                     console.log("Second tap not adjacent or vertical. Resetting.");
+                      // Treat as new first tap
+                      firstTap = { row, col };
+                      // Move cursor to new selection
+                      cursor.row = row;
+                      cursor.col = Math.min(col, GRID_WIDTH - 2);
+                      renderCursor();
                  }
              }
-
-             // Clear firstTap after a short delay if no second tap occurs
-             // setTimeout(() => { if (firstTap && firstTap.row === row && firstTap.col === col) firstTap = null; }, 1000);
+             // Clear firstTap after a delay if no second tap occurs? Might be annoying.
+             */
         });
 
 
-        // Display cursor only after game starts
-        startButton.addEventListener('click', () => {
-            // ... other init stuff ...
-            cursorElement.style.display = 'block'; // Show cursor
-            renderCursor(); // Position it correctly
-        });
-        restartButton.addEventListener('click', () => {
-             // ... other init stuff ...
-             cursorElement.style.display = 'block'; // Show cursor
-             renderCursor(); // Position it correctly
-        });
-
+        // --- Initial Setup ---
+        startOverlay.style.display = 'flex';
+        cursorElement.style.display = 'none'; // Hide cursor until game starts
 
     </script>
 </body>
