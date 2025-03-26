@@ -1,0 +1,136 @@
+This game should replicate the core mechanics of the classic title Tetris Attack (aka Panel de Pon or Puzzle League). Carefully follow the expanded requirements below, especially for the two-phase clearing and combo/chain mechanics.
+
+⸻
+
+1. Single-Page HTML Structure
+	•	Produce one fully self-contained HTML file:
+	•	A <head> with <title> and either inline <style> or CSS within the same file.
+	•	A <body> containing all elements for the game (grid, UI, overlays).
+	•	<script> blocks for all game logic (no external .js files).
+	•	Base64-encoded data URIs for audio (sound effects) and any images or icon assets.
+	•	The end result must be just one file that runs in any modern browser without external dependencies.
+
+⸻
+
+2. Game Overview
+	•	Title: “Block Attack”
+	•	Single-Player Endless Mode: The stack of blocks rises from the bottom, and the player’s goal is to prevent the blocks from reaching the top.
+	•	Difficulty: The rate at which new rows appear (the “rise interval”) decreases over time, making the game progressively faster and more difficult.
+	•	Scoring: The player earns points by clearing matches, with additional bonuses for combos (clearing more than 3 blocks in a single match group) and chains (consecutive clears caused by falling blocks forming new matches).
+
+⸻
+
+3. Core Mechanics
+	1.	Grid/Board:
+	•	A 6-column x 12-row playfield, arranged so the bottom row is the “lowest” on-screen.
+	•	Each cell can be empty or contain a colored/symbolized block.
+	2.	Block Swapping:
+	•	A two-block-wide cursor can be moved around with arrow keys (or tapping/clicking if supporting touch/mouse).
+	•	Pressing a swap button/key (e.g., space, ‘X’, or a tap on adjacent cells) swaps the two horizontally adjacent blocks under the cursor.
+	3.	Rising Stack:
+	•	At fixed intervals, every block in the stack shifts up one row.
+	•	A new row of randomly generated blocks appears at the bottom.
+	•	This interval shortens gradually to increase difficulty.
+	•	If any block reaches beyond the top row, the game ends.
+
+⸻
+
+4. Two-Phase Clearing & Drop Mechanic
+
+The clearing (removal) of matched blocks happens in two phases, crucially mirroring Tetris Attack’s feel:
+	1.	Detection & Flashing:
+	•	Whenever a horizontal or vertical line of 3 or more identical blocks is found, mark those blocks for clearing.
+	•	All blocks that formed matches during the same detection pass should flash (or blink) simultaneously.
+	•	There should be a small delay while they flash before any blocks actually disappear.
+	2.	Individual Block Removal:
+	•	After the flashing delay, the marked blocks disappear one at a time (in quick succession or very short intervals).
+	•	The removal should still happen quickly, but not instantly all at once; each block in the matched group is removed in a slightly staggered manner.
+	•	Important: The player may continue to swap blocks even while these marked blocks are flashing or in the process of disappearing. This can lead to new matches forming mid-animation, enabling advanced chain strategies.
+	3.	Gravity / Drop:
+	•	Once blocks disappear, any blocks above fall down to fill the empty spaces.
+	•	If, after the drop, new matches form, these matches will trigger additional clears (i.e., chaining).
+
+Allowing Swaps During Clearing
+	•	In Tetris Attack–style games, you do not need to lock the player input while blocks are clearing.
+	•	The cursor should remain usable, giving skilled players a chance to create new matches even as previous blocks are vanishing or falling.
+	•	This detail greatly affects chaining: players can set up new combos while the blocks are mid-clear.
+
+⸻
+
+5. Combos and Chains
+
+Tetris Attack differentiates between:
+	1.	Combos:
+	•	A single “clear event” that removes more than 3 blocks at once.
+	•	For example, matching a line of 4, 5, 6, or more blocks simultaneously.
+	•	Usually, games award extra points for each block above 3 in the group.
+	2.	Chains:
+	•	Successive clearing events caused by blocks falling and forming new matches immediately or with a slight delay.
+	•	Each time a new match forms after the previous blocks have vanished (and gravity has taken effect), that’s the next “chain link.”
+	•	For instance:
+	•	First match = Chain 1
+	•	After blocks drop, a new match forms from the blocks that landed = Chain 2
+	•	Another match forms from the next drop, etc. = Chain 3, and so on.
+	•	The chain count increases by 1 each time a new chain occurs consecutively.
+	•	Typically, each additional link in a chain grants a multiplier to the points earned.
+
+Implementation Detail:
+	•	As soon as the first set of blocks is detected and starts flashing, that’s Chain #1.
+	•	After they vanish and blocks drop, if a new set of matches occur from the rearranged blocks, that’s Chain #2. If those matches cause more blocks to drop and match again, that’s Chain #3, etc.
+	•	Importantly, because swaps can happen during clearing/falling, a player might form additional matches that increase the chain count even before the chain logic checks for the next phase.
+
+⸻
+
+6. User Interaction & Controls
+	•	Keyboard:
+	•	Arrow keys for moving the 2-block cursor.
+	•	A chosen key (e.g., “X” or space) to swap the two blocks under the cursor.
+	•	Mouse/Touch:
+	•	Tapping/clicking on one block and then an adjacent block to swap them, or
+	•	A drag-based or two-cell highlight approach (whichever is simpler to implement).
+	•	The key point is that the user can initiate swaps at any time, including while blocks are clearing/flashing.
+
+⸻
+
+7. Visual & Audio Requirements
+	1.	Graphics:
+	•	Use simple, colorful squares or icons for the blocks.
+	•	Visually flash matched blocks during the clearing delay (e.g., blink them or outline them).
+	•	Animate them vanishing one by one.
+	•	Animate blocks falling down after the vanish.
+	2.	Sound Effects:
+	•	At minimum:
+	•	Swap sound (when blocks swap).
+	•	Clear sound (when blocks disappear).
+	•	Game Over sound.
+	•	All embedded via base64 in the HTML.
+	3.	No Background Music is required (optional if desired).
+
+⸻
+
+8. Difficulty & Rising Mechanic
+	•	Start with a slower rise interval (e.g., 5 seconds).
+	•	Decrease the rise interval over time (e.g., every time the stack rises, reduce by a fixed amount until a minimum speed is reached).
+	•	End the game when any block is forced beyond the top.
+
+⸻
+
+9. Scoring
+	•	Award points for each block cleared.
+	•	Add combo bonuses for clearing 4+ blocks at once in a single group.
+	•	Add chain multipliers for each consecutive chain link (e.g., 2× for Chain #2, 3× for Chain #3, etc.).
+	•	Display the current score (and possibly the chain count) prominently in the UI.
+
+⸻
+
+10. Final Deliverable & Testing
+
+You must provide a single .html file that:
+	1.	Contains the entire game logic, styles, and audio.
+	2.	Runs in modern desktop and mobile web browsers with no external resources.
+	3.	Implements both phases of block clearing (flash, then staggered removal).
+	4.	Allows immediate block swapping at any time (no “lockout” during clearing or falling).
+	5.	Correctly handles combo detection (4+ matches) and chain detection (consecutive clears).
+	6.	Ends with a clear Game Over screen when blocks exceed the top, showing the final score and a restart option.
+
+⸻
