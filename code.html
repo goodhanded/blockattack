@@ -198,6 +198,7 @@
 
         const FLASH_DURATION = 400; // ms for blocks to flash
         const INDIVIDUAL_REMOVE_DELAY = 50; // ms between each block vanishing in a match
+        const FALL_DURATION = 150; // ms for falling animation (matches CSS)
 
         // --- DOM Elements ---
         const gameBoard = document.getElementById('game-board');
@@ -221,9 +222,8 @@
         let isGameOver = false;
         let isProcessing = false; // Flag to manage sequential processing (clearing, falling)
         let nextBlockId = 0;
-        let blocksToClear = []; // Blocks marked for clearing in the current step
+        // let blocksToClear = []; // Removed global blocksToClear, handled locally now
         let activeClearPromises = []; // Track ongoing clearing sequences
-
         // --- Audio Assets (Base64 Encoded) ---
         // Simple synthesized sounds (replace with actual Base64 if you have files)
         // Format: new Audio('data:audio/wav;base64,YOUR_BASE64_STRING');
@@ -484,22 +484,30 @@
 
              playSound(swapSound);
 
-             // Reset state after swap animation (use timeout matching CSS transition)
+             // After swap animation completes: Reset state, apply gravity, THEN check matches
              setTimeout(() => {
+                 // --- Reset state first ---
                  if (block1) {
-                     block1.state = 'idle';
+                     block1.state = 'idle'; // Assume idle, gravity check will correct if needed
                      if(block1.element) block1.element.classList.remove('swapping');
                  }
                  if (block2) {
-                     block2.state = 'idle';
+                     block2.state = 'idle'; // Assume idle
                      if(block2.element) block2.element.classList.remove('swapping');
                  }
 
-                 // Check for matches *after* the swap animation completes
-                 // This prevents checks while blocks are visually mid-swap
-                 checkMatchesAndProcess();
+                 // --- Apply Gravity ---
+                 // applyGravity will check the entire board, including the columns
+                 // where the swap just occurred. If blocks need to fall, it handles
+                 // the falling animation and *then* calls checkMatchesAndProcess.
+                 // If no blocks fall, it proceeds directly to checkMatchesAndProcess (or just finishes).
+                 // console.log("Swap animation complete. Applying gravity check...");
+                 applyGravity(); // No 'onComplete' needed here, rely on its internal flow
 
-             }, 80); // Match the .swapping transition duration
+                 // --- DO NOT call checkMatchesAndProcess() here anymore ---
+                 checkMatchesAndProcess(); // <--- REMOVED
+
+             }, 80); // Match the .swapping transition duration (must be >= CSS)
          }
 
 
@@ -615,24 +623,37 @@
             return allMatches; // Returns array of match groups (arrays of block objects)
         }
 
-       function initiateClearing(blocksToProcess) {
-            console.log(`Initiating clear for ${blocksToProcess.length} blocks. Chain: ${currentChain}`);
-            blocksToClear = blocksToProcess; // Store for reference
+        function initiateClearing(blocksToProcess) {
+            // Prevent processing null/undefined blocks often caused by race conditions
+            const validBlocksToClear = blocksToProcess.filter(b => b && b.element && grid[b.row]?.[b.col]?.id === b.id);
 
-            if (blocksToClear.length === 0) {
-                 isProcessing = false;
-                 return; // Nothing to clear
+            if (validBlocksToClear.length === 0) {
+                 // console.log("Initiate Clearing called with no valid blocks.");
+                 // If called during a chain, gravity might still need to run if prior clears happened
+                 // But if called initially with no matches, processing should stop.
+                 // Let applyGravity handle the final check/processing release.
+                 applyGravity(() => {
+                    // This is the final step if no clearing actually happened
+                    isProcessing = false;
+                    // Check if chain needs reset *here* if nothing cleared/fell
+                    if(currentChain > 0 && !findMatches().length) {
+                        // console.log("Chain ended (no valid blocks cleared).")
+                        currentChain = 0;
+                        updateChainDisplay();
+                    }
+                 });
+                 return; // Nothing to clear in this specific batch
              }
 
+            console.log(`Initiating clear for ${validBlocksToClear.length} blocks. Chain: ${currentChain}`);
+
             // Phase 1: Mark and Flash
-            blocksToClear.forEach(block => {
-                if (block && block.element && block.state !== 'flashing' && block.state !== 'clearing') {
+            validBlocksToClear.forEach(block => {
+                if (block.state !== 'flashing' && block.state !== 'clearing') {
                      block.state = 'flashing';
                      block.element.classList.add('flashing');
-                } else if (!block) {
-                    console.warn("Attempted to flash a null block");
-                } else if (!block.element) {
-                     console.warn(`Block ${block.id} has no element to flash.`);
+                } else {
+                    console.warn(`Block ${block.id} was already ${block.state}, skipping flash.`);
                 }
             });
 
@@ -641,11 +662,10 @@
                 // Phase 2: Staggered Removal after Flash Delay
                 setTimeout(() => {
                     // Sort blocks for consistent removal (e.g., bottom-up, left-right)
-                    const sortedBlocks = [...blocksToClear].sort((a, b) => {
+                    const sortedBlocks = [...validBlocksToClear].sort((a, b) => {
                         if (a.row !== b.row) return a.row - b.row;
                         return a.col - b.col;
                     });
-                    blocksToClear = []; // Clear the global list for next cycle
 
                     removeBlocksSequentially(sortedBlocks, resolve); // Pass resolve function
 
@@ -657,169 +677,249 @@
                 // Remove this promise from the active list once it's fully resolved
                 activeClearPromises = activeClearPromises.filter(p => p !== clearPromise);
                  // If no other clears are running, mark processing as potentially finished
-                 if (activeClearPromises.length === 0) {
-                    // isProcessing = false; // Re-evaluate if needed after gravity/next check
-                 }
+                 // The final 'isProcessing = false' is now handled after gravity check
+                 // if (activeClearPromises.length === 0) {
+                 //    isProcessing = false;
+                 // }
+             }).catch(err => {
+                 console.error("Error during clearing process:", err);
+                 // Handle potential errors, maybe force reset isProcessing
+                 activeClearPromises = activeClearPromises.filter(p => p !== clearPromise);
+                 isProcessing = false; // Force release processing lock on error
              });
          }
 
 
         function removeBlocksSequentially(blocksToRemove, onComplete) {
+            // Base case moved to the end of the function
+
+            const block = blocksToRemove.shift(); // Get the next block to remove
+
+            if (block) {
+                 // Double check block state and grid position before removal
+                 const gridBlock = grid[block.row]?.[block.col];
+                 if(gridBlock && gridBlock.id === block.id && (block.state === 'flashing' || block.state === 'clearing')) {
+                    // console.log(`Removing block ${block.id} at (${block.row}, ${block.col})`);
+                    block.state = 'clearing'; // Ensure state is clearing
+                    if (block.element) {
+                        block.element.classList.remove('flashing');
+                        block.element.style.transition = 'transform 0.1s ease-in, opacity 0.1s ease-in'; // Vanish animation
+                        block.element.style.transform = 'scale(0)';
+                        block.element.style.opacity = '0';
+
+                        // Remove from DOM after animation
+                        setTimeout(() => {
+                            block.element.remove();
+                        }, 100); // Match vanish animation time
+                    }
+
+                    // Remove from main blocks array
+                    const blockIndex = blocks.findIndex(b => b.id === block.id);
+                    if (blockIndex > -1) {
+                        blocks.splice(blockIndex, 1);
+                    }
+
+                    // Nullify in grid model immediately
+                    grid[block.row][block.col] = null;
+
+                    playSound(clearSound);
+                 } else {
+                     console.warn(`Skipping removal of block ${block.id}: Not found in grid or state changed unexpectedly. Current state: ${block.state}, Grid contains: ${gridBlock?.id}`);
+                 }
+
+            } else {
+                 console.warn("Tried to remove invalid block entry (null/undefined).");
+            }
+
+
             if (blocksToRemove.length === 0) {
                 // All blocks in this batch removed, trigger gravity
-                // console.log("Sequential removal complete, applying gravity...");
-                applyGravity(onComplete); // Pass the resolver function
-                return;
+                 // console.log("Sequential removal complete, applying gravity...");
+                 // Use requestAnimationFrame to ensure DOM updates (removals) are flushed before gravity calc
+                 requestAnimationFrame(() => {
+                     applyGravity(onComplete); // Pass the resolver function
+                 });
+                 return; // End recursion/sequence here
+             } else {
+                // Schedule the next removal
+                setTimeout(() => removeBlocksSequentially(blocksToRemove, onComplete), INDIVIDUAL_REMOVE_DELAY);
             }
-
-            const block = blocksToRemove.shift(); // Get the next block
-
-            if (block && block.element) {
-                // console.log(`Removing block ${block.id} at (${block.row}, ${block.col})`);
-                block.state = 'clearing';
-                block.element.classList.remove('flashing');
-                block.element.style.transition = 'transform 0.1s ease-in, opacity 0.1s ease-in'; // Vanish animation
-                block.element.style.transform = 'scale(0)';
-                block.element.style.opacity = '0';
-
-                // Find the block in the main 'blocks' array and remove it after animation
-                 setTimeout(() => {
-                     if(block.element) block.element.remove(); // Remove from DOM
-                 }, 100); // Match vanish animation time
-
-                 // Remove from main blocks array
-                 const blockIndex = blocks.findIndex(b => b.id === block.id);
-                 if (blockIndex > -1) {
-                     blocks.splice(blockIndex, 1);
-                 } else {
-                      console.warn(`Could not find block ${block.id} in main array for removal.`);
-                 }
-
-                 // Remove from grid model immediately
-                if (grid[block.row] && grid[block.row][block.col] && grid[block.row][block.col].id === block.id) {
-                     grid[block.row][block.col] = null;
-                 } else {
-                     // This might happen if state changed rapidly (e.g. swapped away) - log it
-                     console.warn(`Block ${block.id} not found at expected grid position (${block.row}, ${block.col}) during removal.`);
-                 }
-
-                playSound(clearSound); // Play sound for each block (or maybe just once per batch?)
-            } else {
-                console.warn("Tried to remove invalid block:", block);
-            }
-
-
-            // Schedule the next removal
-            setTimeout(() => removeBlocksSequentially(blocksToRemove, onComplete), INDIVIDUAL_REMOVE_DELAY);
         }
 
 
          function applyGravity(onComplete) {
              // console.log("Applying gravity...");
              let blocksFell = false;
-             let maxFallDistance = 0;
+             let fallingBlockPromises = []; // Keep track of falling animations if needed
 
-             // Process column by column, bottom up
+             // Use the robust readRow/writeRow logic
              for (let c = 0; c < GRID_WIDTH; c++) {
-                 let emptyRow = 0; // Start searching for empty spots from the bottom
-                 for (let r = 0; r < GRID_HEIGHT; r++) {
-                     if (grid[r][c] === null) {
-                         // Found an empty spot at `r`. Keep track of the lowest one (`emptyRow`).
-                         emptyRow = Math.max(emptyRow, r); // This logic seems reversed, should find lowest empty first
-                         continue; // No block here, keep searching upwards in this column
-                     }
+                let writeRow = 0; // Start from the bottom row for writing settled blocks
+                for (let readRow = 0; readRow < GRID_HEIGHT; readRow++) {
+                    const block = grid[readRow][c];
+                    if (block !== null) {
+                        // Found a block. If its readRow is above its destined writeRow, it needs to fall.
+                        if (readRow !== writeRow) {
+                            // console.log(`Block ${block.id} at (${readRow}, ${c}) falling to (${writeRow}, ${c})`);
 
-                     // Found a block at `r`. Find the lowest empty spot *below* it.
-                     let fallToRow = -1;
-                     for(let er = 0; er < r; er++){
-                        if(grid[er][c] === null){
-                            fallToRow = er; // This is the lowest empty spot below the current block
-                            break;
+                            // Check if the block is already clearing (shouldn't happen ideally, but safety check)
+                            if (block.state === 'clearing' || block.state === 'flashing') {
+                                console.warn(`Block ${block.id} trying to fall while in state ${block.state}. Skipping fall.`);
+                                // Don't move it, leave the grid inconsistent? Or nullify readRow?
+                                // Best: ensure clearing blocks are fully removed *before* gravity.
+                                // The requestAnimationFrame in removeBlocksSequentially helps.
+                                // If it still happens, nullify the original spot and log error.
+                                grid[readRow][c] = null;
+                                continue; // Skip processing this potentially problematic block for falling
+                            }
+
+
+                            grid[writeRow][c] = block; // Move block pointer in grid model
+                            grid[readRow][c] = null;   // Clear original spot in grid model
+
+                            block.row = writeRow;     // Update block object's row property
+                            block.state = 'falling';
+
+                            if(block.element) {
+                                block.element.classList.add('falling');
+                                // updateBlockPosition triggers the CSS transition to the new 'top' value
+                                updateBlockPosition(block);
+                                blocksFell = true;
+
+                                // Optional: Create a promise for each falling animation if precise timing needed later
+                                // fallingBlockPromises.push(new Promise(resolve => setTimeout(resolve, FALL_DURATION)));
+                            } else {
+                                console.warn(`Block ${block.id} is missing its element during gravity.`);
+                            }
                         }
-                     }
-
-                     if (fallToRow !== -1) {
-                         // This block needs to fall
-                         const block = grid[r][c];
-                         // console.log(`Block ${block.id} at (${r}, ${c}) falling to (${fallToRow}, ${c})`);
-
-                         grid[fallToRow][c] = block; // Move block in grid model
-                         grid[r][c] = null;         // Clear original spot
-
-                         const fallDistance = r - fallToRow;
-                         maxFallDistance = Math.max(maxFallDistance, fallDistance);
-
-                         block.row = fallToRow;     // Update block object's row
-                         block.state = 'falling';
-                         if(block.element) {
-                             block.element.classList.add('falling');
-                             updateBlockPosition(block); // Trigger CSS transition
-                         }
-                         blocksFell = true;
-
-                         // Important: After moving a block down, we need to re-evaluate the column from the spot it fell *to*
-                         // because other blocks above it might now need to fall further.
-                         // Resetting r to 'fallToRow' makes sure the next iteration checks correctly.
-                         // This column scanning needs to be robust. A simpler way:
-                         // Scan column bottom-up. Keep track of the lowest available empty slot (`writeRow`).
-                         // When a block is found at `readRow`, move it to `writeRow` and increment `writeRow`.
-                     }
-                 }
-             }
-
-             // Alternative (potentially cleaner) gravity logic:
-             // for (let c = 0; c < GRID_WIDTH; c++) {
-             //    let writeRow = 0;
-             //    for (let readRow = 0; readRow < GRID_HEIGHT; readRow++) {
-             //        if (grid[readRow][c] !== null) {
-             //            if (readRow !== writeRow) {
-             //                 const block = grid[readRow][c];
-             //                 grid[writeRow][c] = block;
-             //                 grid[readRow][c] = null;
-             //                 block.row = writeRow;
-             //                 block.state = 'falling';
-             //                 if(block.element) {
-             //                     block.element.classList.add('falling');
-             //                     updateBlockPosition(block);
-             //                 }
-             //                 blocksFell = true;
-             //                 maxFallDistance = Math.max(maxFallDistance, readRow - writeRow);
-             //            }
-             //            writeRow++;
-             //        }
-             //    }
-             // }
+                        writeRow++; // Increment writeRow, this is where the *next* block above should land
+                    }
+                }
+            } // End column loop
 
              if (blocksFell) {
                  // Wait for falling animation to complete before checking for new matches
-                 const fallDuration = 150; // Match CSS transition for .falling
                  setTimeout(() => {
-                     // Reset state of fallen blocks
+                     // Reset state of fallen blocks *after* animation
                      blocks.forEach(block => {
-                         if (block.state === 'falling') {
+                         if (block && block.state === 'falling') {
                              block.state = 'idle';
-                              if(block.element) block.element.classList.remove('falling');
+                              if(block.element) {
+                                  block.element.classList.remove('falling');
+                                  // Ensure final position is pixel-perfect after transition
+                                  updateBlockPosition(block);
+                              }
                          }
                      });
                      // console.log("Gravity settled, checking for chain matches...");
-                     isProcessing = false; // Release lock before next check
+                     isProcessing = false; // Release lock *before* next check
                      checkMatchesAndProcess(); // Check for new matches (chain reaction)
                      if (onComplete) onComplete(); // Resolve the promise from initiateClearing
-                 }, fallDuration);
+                 }, FALL_DURATION); // Wait duration matching CSS transition
              } else {
                  // No blocks fell, process is complete for this cycle
                  // console.log("Gravity applied, no blocks fell.");
                  isProcessing = false; // Release processing lock
                  if (onComplete) onComplete(); // Resolve the promise
+
                   // If nothing fell and no matches were found initially, the chain ends here.
-                  // Reset chain if it wasn't already reset by checkMatchesAndProcess finding nothing.
-                  if (currentChain > 0 && !findMatches().length) { // Double check if needed
-                    console.log(`Chain ended at x${currentChain} after gravity.`);
-                    currentChain = 0;
-                    updateChainDisplay();
+                  // Check if the chain *should* end.
+                  if (currentChain > 0) {
+                       // Perform a final check to see if any matches exist *now*
+                       const finalMatches = findMatches();
+                       if(finalMatches.length === 0) {
+                            // console.log(`Chain ended at x${currentChain} after gravity (no blocks fell).`);
+                            currentChain = 0;
+                            updateChainDisplay();
+                       } else {
+                            // This case should theoretically be caught by the checkMatchesAndProcess above,
+                            // but as a fallback, ensure processing restarts if matches were somehow missed.
+                            console.warn("Matches found after gravity settle, but blocksFell was false? Re-initiating check.");
+                            checkMatchesAndProcess();
+                       }
                   }
              }
          }
+
+        // Ensure checkMatchesAndProcess sets isProcessing correctly
+        function checkMatchesAndProcess() {
+            if (isProcessing) {
+                // console.log("Queueing check: Already processing.");
+                return; // Avoid concurrent processing
+            }
+
+            // Check for Game Over condition (blocks stacked too high and stable)
+            for (let c = 0; c < GRID_WIDTH; c++) {
+                 // Check the buffer row (GRID_HEIGHT)
+                if (grid[GRID_HEIGHT]?.[c] !== null && grid[GRID_HEIGHT][c].state !== 'clearing' && grid[GRID_HEIGHT][c].state !== 'flashing') {
+                    // Allow a brief moment for things to potentially clear
+                    // A block being *in* the buffer row isn't instant death, but being *pushed* from there is.
+                    // The check in riseStack handles the push, this handles stable blocks too high.
+                    triggerGameOver(`Stable block detected in buffer row (${GRID_HEIGHT}, ${c})`);
+                    return; // Stop processing on game over
+                }
+            }
+
+
+            isProcessing = true; // Mark start of processing cycle
+            // console.log("Checking for matches...");
+
+            const matches = findMatches(); // Find matches using only 'idle' blocks
+
+            if (matches.length > 0) {
+                // console.log(`Found ${matches.length} blocks in matches.`);
+                currentChain++;
+                updateChainDisplay();
+
+                let pointsEarned = 0;
+                let basePointsPerBlock = 10;
+                let comboBonus = 0; // Bonus for matches > 3
+                let chainBonus = currentChain > 1 ? (currentChain - 1) * 50 : 0; // Simple escalating chain bonus
+
+                 const uniqueBlocksToClear = new Set();
+                 matches.forEach(matchList => {
+                     matchList.forEach(block => {
+                         if (block && block.state === 'idle') { // Only add idle blocks to the clear set
+                             uniqueBlocksToClear.add(block);
+                         } else if (block && (block.state === 'falling' || block.state === 'swapping')) {
+                              // Log if we found a match involving a non-idle block (shouldn't happen with current findMatches)
+                             console.warn(`Match found involving block ${block.id} in state ${block.state}`);
+                         }
+                     });
+                     if (matchList.length > MIN_MATCH_LENGTH) {
+                         comboBonus += (matchList.length - MIN_MATCH_LENGTH) * 15; // Example bonus
+                     }
+                 });
+
+                 if (uniqueBlocksToClear.size === 0) {
+                     // Matches were found, but involved non-idle blocks only?
+                     console.warn("Matches array was not empty, but uniqueBlocksToClear is empty. Match involved non-idle blocks?");
+                     isProcessing = false; // Release lock, nothing to clear this cycle
+                     // Potentially reset chain if this state persists?
+                     return;
+                 }
+
+                 pointsEarned = uniqueBlocksToClear.size * basePointsPerBlock + comboBonus + chainBonus;
+                 score += pointsEarned;
+                 updateScoreDisplay();
+
+                 // Start the two-phase clearing process
+                 // Pass only the valid, unique, idle blocks
+                 initiateClearing(Array.from(uniqueBlocksToClear));
+
+            } else {
+                // No matches found among idle blocks
+                // console.log("No matches found.");
+                if (currentChain > 0) {
+                    // console.log(`Chain ended at x${currentChain}`);
+                    currentChain = 0;
+                    updateChainDisplay();
+                }
+                // Crucial: Release the processing lock if no matches are found
+                isProcessing = false;
+            }
+        }
+
 
 
         function triggerGameOver(reason) {
