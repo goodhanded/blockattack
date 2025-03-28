@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block Attack</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #222;
+            color: #eee;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+
+        #game-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        #ui-panel {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+            padding: 0 10px;
+        }
+
+        #score, #chain {
+             background-color: #444;
+             padding: 5px 15px;
+             border-radius: 5px;
+        }
+
+        #game-board {
+            position: relative;
+            width: 240px; /* 6 columns * 40px */
+            height: 480px; /* 12 rows * 40px */
+            background-color: #111;
+            border: 2px solid #555;
+            overflow: hidden; /* Crucial for hiding blocks above the top */
+        }
+
+        .block {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            /* Transition for falling and swapping, NOT for top/left during continuous rise */
+            transition: top 0.1s ease-out, left 0.1s ease-out, transform 0.1s ease-out, opacity 0.1s ease-in;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+            /* transform for continuous rise offset */
+            transform: translateY(0px);
+            will-change: transform, top, left; /* Optimization hint */
+        }
+
+        /* Simple block colors/styles */
+        .block-type-0 { background-color: #FF5733; } /* Red */
+        .block-type-1 { background-color: #33FF57; } /* Green */
+        .block-type-2 { background-color: #3357FF; } /* Blue */
+        .block-type-3 { background-color: #FFFF33; } /* Yellow */
+        .block-type-4 { background-color: #FF33FF; } /* Magenta */
+        .block-type-5 { background-color: #33FFFF; } /* Cyan */
+
+        .block.falling {
+             /* Falling uses 'top' property transition */
+             transition: top 0.15s ease-in, left 0.1s ease-out, opacity 0.1s ease-in;
+             transform: translateY(0px) !important; /* Override rise transform during fall */
+        }
+
+        .block.swapping {
+             /* Swapping uses 'left' property transition */
+             transition: left 0.08s linear, top 0.1s ease-out, opacity 0.1s ease-in;
+             transform: translateY(0px) !important; /* Override rise transform during swap */
+        }
+
+        .block.flashing {
+            animation: flash 0.4s infinite alternate;
+            /* Ensure transform doesn't interfere with flash scaling */
+        }
+
+        @keyframes flash {
+            0% { opacity: 1; transform: scale(1.05); box-shadow: 0 0 10px white; }
+            100% { opacity: 0.5; transform: scale(1); box-shadow: none; }
+        }
+        
+        #cursor {
+            position: absolute;
+            width: 80px; /* 2 blocks wide */
+            height: 40px; /* 1 block high */
+            border: 3px solid #FFF;
+            pointer-events: none; /* Don't interfere with clicks */
+            transition: top 0.05s linear, left 0.05s linear;
+            z-index: 10;
+            box-shadow: 0 0 8px #FFF;
+            /* Cursor also needs to move with the rise */
+             transform: translateY(0px);
+             will-change: transform, top, left;
+        }
+
+        #game-over-overlay, #start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            text-align: center;
+            z-index: 20;
+        }
+
+        #game-over-overlay h2, #start-overlay h2 {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+
+        #game-over-overlay p, #start-overlay p {
+            font-size: 1.2em;
+            margin-bottom: 25px;
+        }
+
+        #game-over-overlay button, #start-overlay button {
+            padding: 15px 30px;
+            font-size: 1.2em;
+            cursor: pointer;
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            border-radius: 5px;
+            transition: background-color 0.2s;
+        }
+
+        #game-over-overlay button:hover, #start-overlay button:hover {
+            background-color: #45a049;
+        }
+        #start-overlay p.controls {
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #ccc;
+            max-width: 80%;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="ui-panel">
+            <div id="score">Score: 0</div>
+            <div id="chain">Chain: x0</div>
+        </div>
+        <div id="game-board">
+            <div id="cursor"></div>
+            <!-- Blocks will be added here by JavaScript -->
+        </div>
+    </div>
+
+    <div id="start-overlay">
+        <h2>Block Attack</h2>
+        <p>Clear blocks by matching 3 or more!</p>
+         <p class="controls">Controls:<br>Arrow Keys: Move Cursor<br>Spacebar / X: Swap Blocks</p>
+        <button id="start-button">Start Game</button>
+    </div>
+
+    <div id="game-over-overlay" style="display: none;">
+        <h2>Game Over</h2>
+        <p id="final-score">Final Score: 0</p>
+        <button id="restart-button">Restart</button>
+    </div>
+
+    <script src="js/constants.js"></script>
+    <script src="js/rendering.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/input.js"></script>
+</body>
+</html>
