@@ -83,20 +83,18 @@ body {
 .block.falling {
      /* Falling uses 'top' property transition */
      transition: top 0.15s ease-in, left 0.1s ease-out, opacity 0.1s ease-in;
-     transform: translateY(0px) !important; /* Override rise transform during fall */
 }
 
 .block.swapping {
      /* Swapping uses 'left' property transition */
      transition: left 0.08s linear, top 0.1s ease-out, opacity 0.1s ease-in;
-     transform: translateY(0px) !important; /* Override rise transform during swap */
 }
 
 .block.flashing {
     animation: flash 0.4s infinite alternate;
     /* Ensure transform doesn't interfere with flash scaling */
 }
-
+        
 @keyframes flash {
     0% { opacity: 1; transform: scale(1.05); box-shadow: 0 0 10px white; }
     100% { opacity: 0.5; transform: scale(1); box-shadow: none; }

@@ -15,11 +15,8 @@ function updateBlockVisualPosition(blockData) {
     const baseY = (VISIBLE_GRID_HEIGHT - 1 - blockData.row) * BLOCK_SIZE;
     blockData.element.style.left = `${baseX}px`;
     blockData.element.style.top = `${baseY}px`;
-    if (blockData.state !== 'falling' && blockData.state !== 'swapping') {
-        blockData.element.style.transform = `translateY(${-riseOffset}px)`;
-    } else {
-        blockData.element.style.transform = `translateY(0px)`;
-    }
+    // Always apply the board's rising offset so that all blocks (idle, swapping, or falling) remain in sync
+    blockData.element.style.transform = `translateY(${-riseOffset}px)`;
 }
 
 function updateAllBlockVisualPositions() {
