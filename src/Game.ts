@@ -587,10 +587,25 @@ export class Game {
                     }
                 });
 
+                // Check if there are new matches formed after blocks fell
+                const newMatches = this.grid.findMatches();
+
+                // If we found new matches, make sure we process them for chain reactions
+                if (newMatches.length > 0) {
+                    console.log(`Found ${newMatches.length} new match groups after gravity. Continuing chain.`);
+                    
+                    // Call the completion callback first if provided
+                    if (onComplete) onComplete();
+                    
+                    // Process the new matches to start the chain reaction
+                    this.checkMatchesAndProcess();
+                    return;
+                }
+
                 // When no active clear promises and no matches, explicitly reset processing flag
                 if (this.activeClearPromises.length === 0) {
                     console.log("No active clear promises, gravity complete");
-                    if (this.grid.findMatches().length === 0) {
+                    if (newMatches.length === 0) {
                         console.log("No matches found after gravity, releasing processing lock");
                         this.setProcessingFlag(false, "gravity-complete-no-matches");
                     } else {
