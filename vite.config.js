@@ -10,11 +10,21 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    // Ensure assets are copied to the build directory
+    assetsInlineLimit: 0,
+    rollupOptions: {
+      input: {
+        main: './index.html',
+      },
+    },
   },
 
   // Configure the development server
   server: {
     port: 3000,
     open: true, // Auto-open browser when starting dev server
-  }
+  },
+  
+  // Define public directory for static assets
+  publicDir: 'public',
 });

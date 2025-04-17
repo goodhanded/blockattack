@@ -9,10 +9,10 @@ export class AudioManager {
 
     constructor() {
         console.log("AudioManager initialized.");
-        // Load actual sound files instead of invalid data URIs
-        this.loadSound('swap', 'audio/swap.mp3');
-        this.loadSound('clear', 'audio/clear.mp3'); 
-        this.loadSound('gameOver', 'audio/gameOver.mp3');
+        // Load sound files from public directory
+        this.loadSound('swap', '/audio/swap.mp3');
+        this.loadSound('clear', '/audio/clear.mp3'); 
+        this.loadSound('gameOver', '/audio/gameOver.mp3');
     }
 
     /**
