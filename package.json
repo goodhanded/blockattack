@@ -1,0 +1,30 @@
+{
+  "name": "blockattack",
+  "version": "1.0.0",
+  "description": "Block Attack is a fast-paced, single-player puzzle game inspired by the classic title *Tetris Attack* (also known as Panel de Pon or Puzzle League). In Block Attack, you control a two-block-wide cursor to swap adjacent blocks on a grid, aiming to clear matches and build combos and chains while preventing the stack from reaching the top.",
+  "main": "src/main.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/goodhanded/blockattack.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/goodhanded/blockattack/issues"
+  },
+  "homepage": "https://github.com/goodhanded/blockattack#readme",
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "@types/web": "^0.0.219",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.1"
+  }
+}
