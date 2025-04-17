@@ -435,8 +435,11 @@ export class Game {
         });
 
         try {
+            // Declare clearPromise outside the Promise constructor
+            let clearPromise: Promise<void>;
+            
             // Create a promise that resolves after blocks are removed and gravity is applied
-            const clearPromise = new Promise<void>((resolve, reject) => {
+            clearPromise = new Promise<void>((resolve, reject) => {
                 const timeoutId = setTimeout(() => {
                     if (this.status !== 'running') {
                         console.log("Clear aborted due to game status change.");
@@ -456,8 +459,7 @@ export class Game {
                     }
                 }, FLASH_DURATION);
                 
-                // Store the timeout ID directly on the Promise object using a symbol
-                // to avoid the TypeScript error about indexing the Promise type
+                // Store the timeout ID directly on the Promise object
                 (clearPromise as any).timeoutId = timeoutId;
             });
 

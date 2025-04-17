@@ -9,16 +9,16 @@ export class AudioManager {
 
     constructor() {
         console.log("AudioManager initialized.");
-        // Preload sounds - consider moving to an async load method if sounds become large
-        this.loadSound('swap', 'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU' + Array(100).join('100'));
-        this.loadSound('clear', 'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU' + Array(150).join('123'));
-        this.loadSound('gameOver', 'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU' + Array(300).join('987'));
+        // Load actual sound files instead of invalid data URIs
+        this.loadSound('swap', 'audio/swap.mp3');
+        this.loadSound('clear', 'audio/clear.mp3'); 
+        this.loadSound('gameOver', 'audio/gameOver.mp3');
     }
 
     /**
      * Loads a sound and stores it in the map.
      * @param name The name to identify the sound.
-     * @param src The data URI or path to the audio file.
+     * @param src The path to the audio file.
      */
     private loadSound(name: string, src: string): void {
         try {
