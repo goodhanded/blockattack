@@ -39,8 +39,7 @@ jobs:
       - name: Sync to S3
         run: |
           aws s3 sync ./dist s3://${{ env.AWS_S3_BUCKET }} \
-            --delete \
-            --acl public-read
+            --delete
 
       - name: Invalidate CloudFront cache
         run: |
