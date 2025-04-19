@@ -58,8 +58,8 @@ body {
     width: 40px;
     height: 40px;
     border: 1px solid rgba(0, 0, 0, 0.2);
-    /* Transition for falling and swapping, NOT for top/left during continuous rise */
-    transition: top 0.1s ease-out, left 0.1s ease-out, transform 0.1s ease-out, opacity 0.1s ease-in;
+    /* Remove transform from transition to ensure smooth continuous rise */
+    transition: top 0.1s ease-out, left 0.1s ease-out, opacity 0.1s ease-in;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -67,7 +67,7 @@ body {
     font-weight: bold;
     color: white;
     text-shadow: 1px 1px 2px black;
-    /* transform for continuous rise offset */
+    /* No transition on transform for continuous smooth motion */
     transform: translateY(0px);
     will-change: transform, top, left; /* Optimization hint */
 }
@@ -92,12 +92,12 @@ body {
 
 .block.flashing {
     animation: flash 0.4s infinite alternate;
-    /* Ensure transform doesn't interfere with flash scaling */
+    /* Ensure transform doesn't interfere with flash scaling by applying it separately */
 }
         
 @keyframes flash {
-    0% { opacity: 1; transform: scale(1.05); box-shadow: 0 0 10px white; }
-    100% { opacity: 0.5; transform: scale(1); box-shadow: none; }
+    0% { opacity: 1; box-shadow: 0 0 10px white; }
+    100% { opacity: 0.5; box-shadow: none; }
 }
         
 #cursor {
@@ -106,10 +106,11 @@ body {
     height: 40px; /* 1 block high */
     border: 3px solid #FFF;
     pointer-events: none; /* Don't interfere with clicks */
+    /* Remove transform from transition for continuous cursor motion */
     transition: top 0.05s linear, left 0.05s linear;
     z-index: 10;
     box-shadow: 0 0 8px #FFF;
-    /* Cursor also needs to move with the rise */
+    /* No transition on transform */
     transform: translateY(0px);
     will-change: transform, top, left;
 }

@@ -185,37 +185,37 @@ export class Grid {
      */
     findMatches(): Block[][] {
         const allMatches: Block[][] = [];
-        const checkedBlocks = new Set<number>();
+        const visitedHoriz = new Set<number>();
+        const visitedVert = new Set<number>();
 
         for (let r = 1; r <= this.visibleHeight; r++) {
             for (let c = 0; c < this.width; c++) {
                 const block = this.getBlock(r, c);
+                if (!block || block.state !== 'idle') continue;
 
-                if (!block || block.state !== 'idle' || checkedBlocks.has(block.id)) {
-                    continue;
-                }
-
-                const blockType = block.type;
-
-                let horizontalMatch = [block];
-                for (let nc = c + 1; nc < this.width; nc++) {
-                    const nextBlock = this.getBlock(r, nc);
-                    if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === blockType) {
-                        horizontalMatch.push(nextBlock);
-                    } else {
-                        break;
+                // Horizontal matches
+                if (!visitedHoriz.has(block.id)) {
+                    const horizontalMatch: Block[] = [block];
+                    for (let nc = c + 1; nc < this.width; nc++) {
+                        const nextBlock = this.getBlock(r, nc);
+                        if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === block.type) {
+                            horizontalMatch.push(nextBlock);
+                        } else {
+                            break;
+                        }
+                    }
+                    if (horizontalMatch.length >= MIN_MATCH_LENGTH) {
+                        allMatches.push(horizontalMatch);
+                        horizontalMatch.forEach(b => visitedHoriz.add(b.id));
                     }
                 }
-                if (horizontalMatch.length >= MIN_MATCH_LENGTH) {
-                    allMatches.push(horizontalMatch);
-                    horizontalMatch.forEach(b => checkedBlocks.add(b.id));
-                }
 
-                if (!checkedBlocks.has(block.id)) {
-                    let verticalMatch = [block];
+                // Vertical matches
+                if (!visitedVert.has(block.id)) {
+                    const verticalMatch: Block[] = [block];
                     for (let nr = r + 1; nr <= this.visibleHeight; nr++) {
                         const nextBlock = this.getBlock(nr, c);
-                        if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === blockType) {
+                        if (nextBlock && nextBlock.state === 'idle' && nextBlock.type === block.type) {
                             verticalMatch.push(nextBlock);
                         } else {
                             break;
@@ -223,7 +223,7 @@ export class Grid {
                     }
                     if (verticalMatch.length >= MIN_MATCH_LENGTH) {
                         allMatches.push(verticalMatch);
-                        verticalMatch.forEach(b => checkedBlocks.add(b.id));
+                        verticalMatch.forEach(b => visitedVert.add(b.id));
                     }
                 }
             }
@@ -269,21 +269,54 @@ export class Grid {
      */
     shiftRowsUp(): void {
         console.log("Shifting rows up...");
+
+        // Create a temporary copy of the block references
+        const tempBlocks: (Block | null)[][] = Array(this.height).fill(null)
+            .map(() => Array(this.width).fill(null));
+        
+        // First pass: Copy all blocks to their new positions in the temp array
         for (let r = this.height - 1; r >= 0; r--) {
             for (let c = 0; c < this.width; c++) {
                 const block = this.getBlock(r, c);
                 const targetRow = r + 1;
-
+                
+                // Only move blocks that are within bounds
                 if (targetRow < this.height) {
-                    this.setBlock(targetRow, c, block);
+                    // Copy reference to temp array
+                    tempBlocks[targetRow][c] = block;
+                    
+                    // Update block's internal position BUT PRESERVE STATE
+                    if (block) {
+                        // Remember original state
+                        const originalState = block.state;
+                        
+                        // Update position property
+                        block.setPosition({row: targetRow, col: c});
+                        
+                        // Restore original state if it was changed
+                        if (block.state !== originalState) {
+                            block.setState(originalState);
+                        }
+                    }
                 } else if (block && block.state !== 'clearing' && block.state !== 'flashing') {
                     console.warn(`Block ${block.id} pushed out of bounds at (${targetRow}, ${c})`);
                 }
             }
         }
-        for (let c = 0; c < this.width; c++) {
-            this.setBlock(0, c, null);
+        
+        // Second pass: Update the main grid array from the temp array
+        // This ensures we don't have conflicts during row shifting
+        for (let r = 0; r < this.height; r++) {
+            for (let c = 0; c < this.width; c++) {
+                this.blocks[r][c] = tempBlocks[r][c];
+            }
         }
+        
+        // Clear the bottom row (row 0) to prepare for new blocks
+        for (let c = 0; c < this.width; c++) {
+            this.blocks[0][c] = null;
+        }
+        
         console.log("Rows shifted.");
     }
 

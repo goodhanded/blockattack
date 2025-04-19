@@ -86,25 +86,21 @@ export class Renderer {
         // Calculate horizontal position (always the same logic)
         const targetX = block.col * BLOCK_SIZE;
         
-        // Calculate vertical position
-        // For blocks at row 0 (below the visible grid), position them exactly at the bottom edge
-        // so they smoothly rise into view without any gap
-        let targetY;
-        
-        if (block.row === 0) {
-            // Position row 0 blocks precisely at the bottom edge of the visible grid
-            targetY = VISIBLE_GRID_HEIGHT * BLOCK_SIZE;
-        } else {
-            // For rows 1+ (visible grid), we use the standard formula
-            const visualRow = VISIBLE_GRID_HEIGHT - block.row;
-            targetY = visualRow * BLOCK_SIZE;
-        }
+        // Calculate vertical position - convert logical grid coordinates to screen coordinates
+        // Row 0 is the bottom of the grid, VISIBLE_GRID_HEIGHT is at the top
+        const visualRow = VISIBLE_GRID_HEIGHT - block.row;
+        const targetY = visualRow * BLOCK_SIZE;
 
-        // Apply base positioning
+        // We'll set these calculated positions as data attributes so they're not lost
+        // during style updates
+        element.dataset.baseX = targetX.toString();
+        element.dataset.baseY = targetY.toString();
+
+        // Set the base position without transition effect
         element.style.left = `${targetX}px`;
         element.style.top = `${targetY}px`;
         
-        // Apply the rise offset (this makes blocks move upward continuously)
+        // Apply the rise offset in pure transform with no transition
         element.style.transform = `translateY(${-riseOffset}px)`;
 
         // Update state classes
@@ -159,6 +155,9 @@ export class Renderer {
 
         this.cursorElement.style.left = `${targetX}px`;
         this.cursorElement.style.top = `${targetY}px`;
+        
+        // Apply the same transformation as blocks to ensure cursor rises smoothly with them
+        // This ensures the cursor stays in the same relative position during rises
         this.cursorElement.style.transform = `translateY(${-riseOffset}px)`;
         this.cursorElement.style.display = 'block'; // Ensure visible
     }

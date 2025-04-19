@@ -190,19 +190,34 @@ export class Game {
         const deltaTime = (timestamp - this.lastTimestamp) / 1000.0; // Delta time in seconds
         this.lastTimestamp = timestamp;
 
-        // Update rise offset
+        // Update rise offset - smooth continuous motion
         this.riseOffset += this.currentRiseSpeed * deltaTime;
 
         // Check if a full block height has been reached
         if (this.riseOffset >= BLOCK_SIZE) {
+            // Important: Store fractional part of rise offset before resetting
+            const fractionalOffset = this.riseOffset % BLOCK_SIZE;
             const logicalRowsToCommit = Math.floor(this.riseOffset / BLOCK_SIZE);
-            this.riseOffset -= logicalRowsToCommit * BLOCK_SIZE;
+            
+            // Update cursor position BEFORE committing rise to maintain its relative position
+            this.cursor.setPosition(this.cursor.row + logicalRowsToCommit, this.cursor.col);
+
+            // IMPORTANT: First update all block visuals with the FULL rise offset
+            // This ensures they're visually at the exact position before the "jump back"
+            this.render();
+
+            // Now reset rise offset to only the fractional part and shift the grid
+            this.riseOffset = fractionalOffset;
 
             for (let i = 0; i < logicalRowsToCommit; i++) {
-                if (this.status !== 'running') break; // Stop if game over occurred mid-commit
+                if (this.status !== 'running') break;
                 this.commitLogicalRise();
             }
 
+            // Immediately render again with the new grid position and reset riseOffset
+            // This eliminates any discontinuity in the visual position
+            this.render();
+            
             // Re-check game over after all commits are done
             if (this.status === 'running' && this.grid.checkGameOverCondition()) {
                 this.triggerGameOver("Block reached top after commit.");
@@ -210,11 +225,15 @@ export class Game {
             }
         }
 
-        // Check for stuck processing flag on EVERY frame, not just once per second
-        this.checkAndResetProcessingFlag(timestamp);
-
-        // Render the current state
-        this.render();
+        // For smoothness, we only want to render once per frame unless we're
+        // processing a logical rise (which we already handled above)
+        else {
+            // Check for stuck processing flag on EVERY frame
+            this.checkAndResetProcessingFlag(timestamp);
+            
+            // Render the current state
+            this.render();
+        }
 
         // Request the next frame
         this.animationFrameId = requestAnimationFrame(this.gameLoop.bind(this));
@@ -240,6 +259,9 @@ export class Game {
         if (this.status !== 'running') return;
         console.log("Committing logical rise.");
 
+        // Do not change cursor position first - let it naturally rise with blocks
+        // This is key to preventing the "drop down" effect on the cursor
+
         this.grid.shiftRowsUp(); // Shift existing blocks up logically
 
         // Check for game over immediately after shift
@@ -252,9 +274,8 @@ export class Game {
         const newRowBlocks = this.grid.generateNewRow();
         
         // Immediately render the new blocks with the current rise offset
-        // This ensures they appear connected to the bottom of the grid
         newRowBlocks.forEach(block => {
-            // Ensure the block is always in idle state - this prevents gravity effects
+            // Force idle state to prevent unintended gravity
             block.setState('idle');
             this.renderer.createBlockElement(block);
             this.renderer.updateBlockVisuals(block, this.riseOffset);
@@ -266,13 +287,18 @@ export class Game {
             this.currentRiseSpeed = Math.min(this.currentRiseSpeed, MAX_RISE_SPEED);
         }
 
-        // Check for matches caused by the new row interacting with the row above it
-        // But skip gravity on new row generation to prevent unwanted falling animation
+        // Check for matches without applying unwanted gravity
         if (!this.isProcessing) {
-            // Check for matches without triggering unwanted gravity on the new row
             const matches = this.grid.findMatches();
             if (matches.length > 0) {
-                this.checkMatchesAndProcess();
+                this.setProcessingFlag(true, "new-row-match-check");
+                
+                // Convert matches to a flat array of unique blocks
+                const uniqueBlocksToClear = Array.from(
+                    new Set(matches.flat().filter(b => b !== null))
+                );
+                
+                this.initiateClearing(uniqueBlocksToClear);
             }
         }
     }
@@ -363,6 +389,7 @@ export class Game {
         const matches = this.grid.findMatches();
 
         if (matches.length > 0) {
+            console.log(`Found ${matches.length} match groups. Chain: ${this.currentChain}`);
             this.currentChain++;
             this.renderer.updateChainDisplay(this.currentChain);
             this.audioManager.playSound('clear');
