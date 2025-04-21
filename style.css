@@ -56,8 +56,8 @@ body {
 /* Game Board and Blocks */
 #game-board {
     position: relative;
-    width: 240px; /* 6 columns * 40px */
-    height: 480px; /* 12 rows * 40px */
+    width: 246px; /* 6 columns * 40px + 6px for borders */
+    height: 486px; /* 12 rows * 40px + 6px for borders */
     background-color: rgba(0, 0, 0, 0.7);
     border: 3px solid rgba(120, 130, 200, 0.7);
     border-radius: 4px;
@@ -97,6 +97,13 @@ body {
     background-position: center;
     background-size: contain;
     opacity: 0.7;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .block-type-0::before { content: "♦"; } /* Red - diamond */

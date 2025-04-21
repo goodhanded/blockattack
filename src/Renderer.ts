@@ -33,8 +33,9 @@ export class Renderer {
         this.finalScoreElement = finalScoreElement;
 
         // Set fixed dimensions for the game board
-        this.gameBoardElement.style.width = `${GRID_WIDTH * BLOCK_SIZE}px`;
-        this.gameBoardElement.style.height = `${VISIBLE_GRID_HEIGHT * BLOCK_SIZE}px`;
+        // Add 6px to account for the border (3px on each side)
+        this.gameBoardElement.style.width = `${(GRID_WIDTH * BLOCK_SIZE) + 6}px`;
+        this.gameBoardElement.style.height = `${(VISIBLE_GRID_HEIGHT * BLOCK_SIZE) + 6}px`;
     }
 
     /**
