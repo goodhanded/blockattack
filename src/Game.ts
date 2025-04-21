@@ -10,6 +10,7 @@ import {
     BLOCK_SIZE,
     INITIAL_RISE_SPEED,
     MAX_RISE_SPEED,
+    RISE_ACCELERATION,
     SPEED_INCREMENT_ON_COMMIT,
     FLASH_DURATION,
     INDIVIDUAL_REMOVE_DELAY,
@@ -40,6 +41,8 @@ export class Game {
     // Continuous Rise State
     private riseOffset: number = 0; // Pixels the grid has risen visually
     private currentRiseSpeed: number = INITIAL_RISE_SPEED; // Pixels per second
+    private manualRaiseActive: boolean = false; // Flag for manual rise mode
+    private savedRiseSpeed: number = INITIAL_RISE_SPEED; // Speed to restore after manual raise
     private lastTimestamp: number = 0;
     private animationFrameId: number | null = null;
 
@@ -71,8 +74,12 @@ export class Game {
             gameOverOverlay,
             finalScoreElement
         );
-        // Pass the handleSwap method bound to 'this' as the callback
-        this.inputHandler = new InputHandler(this.cursor, this.handleSwap.bind(this));
+        this.inputHandler = new InputHandler(
+            this.cursor,
+            this.handleSwap.bind(this),
+            this.startManualRise.bind(this),
+            this.stopManualRise.bind(this)
+        );
 
         console.log("Game components initialized.");
     }
@@ -96,6 +103,27 @@ export class Game {
             console.log(`[${context}] PROCESSING END after ${duration.toFixed(1)}ms`);
             this.processingStartTimestamp = 0;
         }
+    }
+
+    /**
+     * Engages manual rise mode: grid rises at MAX_RISE_SPEED.
+     */
+    private startManualRise(): void {
+        if (this.status !== 'running' || this.manualRaiseActive) return;
+        this.savedRiseSpeed = this.currentRiseSpeed;
+        this.manualRaiseActive = true;
+        this.currentRiseSpeed = MAX_RISE_SPEED * 2; // Double speed for manual rise
+        console.log('Manual rise engaged');
+    }
+
+    /**
+     * Disengages manual rise mode: restore previous rise speed.
+     */
+    private stopManualRise(): void {
+        if (!this.manualRaiseActive) return;
+        this.manualRaiseActive = false;
+        this.currentRiseSpeed = this.savedRiseSpeed;
+        console.log('Manual rise disengaged');
     }
 
     /**
@@ -189,6 +217,12 @@ export class Game {
 
         const deltaTime = (timestamp - this.lastTimestamp) / 1000.0; // Delta time in seconds
         this.lastTimestamp = timestamp;
+
+        // Apply continuous acceleration to rise speed
+        this.currentRiseSpeed = Math.min(
+            this.currentRiseSpeed + RISE_ACCELERATION * deltaTime,
+            MAX_RISE_SPEED
+        );
 
         // Update rise offset - smooth continuous motion
         this.riseOffset += this.currentRiseSpeed * deltaTime;

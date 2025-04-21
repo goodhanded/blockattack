@@ -90,7 +90,7 @@ export class Grid {
      */
     fillInitialBlocks(): void {
         console.log("Filling initial blocks...");
-        for (let r = 1; r <= 6; r++) {
+        for (let r = 1; r <= 2; r++) {
             for (let c = 0; c < this.width; c++) {
                 let type: BlockType;
                 let attempts = 0;

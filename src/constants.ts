@@ -8,11 +8,14 @@ export const BLOCK_SIZE = 40; // px
 export const BLOCK_TYPES = 6; // Number of different block types/colors
 export const MIN_MATCH_LENGTH = 3;
 
+// Number of initial rows to pre-fill on game start
+export const INITIAL_FILL_ROWS = 3; // Rows 1 through INITIAL_FILL_ROWS
+
 // --- Continuous Rise Constants ---
-export const INITIAL_RISE_SPEED = BLOCK_SIZE / 15.0; // Pixels per second (e.g., 1 block every 5 seconds)
+export const INITIAL_RISE_SPEED = BLOCK_SIZE / 20.0; // Pixels per second (e.g., 1 block every 5 seconds)
 export const MAX_RISE_SPEED = BLOCK_SIZE / 0.5;   // Pixels per second (e.g., 1 block every 0.5 seconds)
-export const RISE_ACCELERATION = 0.5; // Pixels per second to add (not actively used)
-export const SPEED_INCREMENT_ON_COMMIT = 1.0; // Pixels per second increase per row committed
+export const RISE_ACCELERATION = 0.05; // Pixels per second to add
+export const SPEED_INCREMENT_ON_COMMIT = 0.2; // Pixels per second increase per row committed
 
 // --- Animation/Timing Constants ---
 export const FLASH_DURATION = 400; // ms for blocks to flash
