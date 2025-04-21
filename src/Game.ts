@@ -168,6 +168,9 @@ export class Game {
 
         this.inputHandler.setupEventListeners();
 
+        // Start playing background music
+        this.audioManager.playBackgroundMusic();
+
         console.log("Game initialized. Starting game loop.");
         this.startGameLoop();
 
@@ -496,12 +499,12 @@ export class Game {
         });
 
         try {
-            // Declare clearPromise outside the Promise constructor
-            let clearPromise: Promise<void>;
+            // Create a timeout ID to track and potentially cancel this process
+            let clearTimeoutId: NodeJS.Timeout; 
             
             // Create a promise that resolves after blocks are removed and gravity is applied
-            clearPromise = new Promise<void>((resolve, reject) => {
-                const timeoutId = setTimeout(() => {
+            const clearPromise = new Promise<void>((resolve, reject) => {
+                clearTimeoutId = setTimeout(() => {
                     if (this.status !== 'running') {
                         console.log("Clear aborted due to game status change.");
                         return reject(new Error("Game ended during clear delay"));
@@ -519,11 +522,9 @@ export class Game {
                         reject(err);
                     }
                 }, FLASH_DURATION);
-                
-                // Store the timeout ID directly on the Promise object
-                (clearPromise as any).timeoutId = timeoutId;
             });
 
+            // Store an object with both the promise and timeoutId for potential cleanup
             this.activeClearPromises.push(clearPromise);
 
             // When this specific clear sequence finishes (including gravity)...
@@ -743,6 +744,8 @@ export class Game {
         this.activeClearPromises = []; // Clear promises array
         this.isProcessing = true; // Prevent any further processing
 
+        // Stop background music and play game over sound
+        this.audioManager.stopBackgroundMusic();
         this.audioManager.playSound('gameOver');
 
         // Final render to ensure blocks are in correct final positions without rise offset
