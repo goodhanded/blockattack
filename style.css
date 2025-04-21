@@ -11,7 +11,7 @@ body {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    background-color: #222;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
     color: #eee;
     overflow: hidden; /* Prevent scrollbars */
 }
@@ -23,9 +23,10 @@ body {
     flex-direction: column;
     align-items: center;
     padding: 20px;
-    background-color: #333;
-    border-radius: 10px;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    background: rgba(30, 30, 60, 0.85);
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), inset 0 0 10px rgba(100, 100, 255, 0.3);
+    border: 1px solid rgba(100, 100, 255, 0.2);
 }
 
 #ui-panel {
@@ -33,14 +34,23 @@ body {
     justify-content: space-between;
     width: 100%;
     margin-bottom: 10px;
-    font-size: 1.2em;
-    padding: 0 10px;
+    padding: 10px 15px;
+    background: rgba(15, 15, 40, 0.7);
+    border-radius: 10px;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
 }
 
 #score, #chain {
-     background-color: #444;
-     padding: 5px 15px;
-     border-radius: 5px;
+    background: linear-gradient(to bottom, rgba(40, 40, 80, 0.9), rgba(20, 20, 40, 0.9));
+    padding: 8px 15px;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 1.1em;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(100, 100, 255, 0.3);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    min-width: 90px;
+    text-align: center;
 }
 
 /* Game Board and Blocks */
@@ -48,16 +58,21 @@ body {
     position: relative;
     width: 240px; /* 6 columns * 40px */
     height: 480px; /* 12 rows * 40px */
-    background-color: #111;
-    border: 2px solid #555;
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 3px solid rgba(120, 130, 200, 0.7);
+    border-radius: 4px;
     overflow: hidden; /* Crucial for hiding blocks above the top */
+    box-shadow: inset 0 0 20px rgba(0, 0, 150, 0.3);
+    animation: game-board-glow 3s infinite alternate;
 }
 
 .block {
     position: absolute;
     width: 40px;
     height: 40px;
-    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.5), 0 3px 5px rgba(0, 0, 0, 0.3);
     /* Keep transitions only for horizontal moves and opacity; vertical rise uses transform */
     transition: left 0.1s ease-out, opacity 0.1s ease-in;
     display: flex;
@@ -72,13 +87,50 @@ body {
     will-change: transform, top, left; /* Optimization hint */
 }
 
-/* Simple block colors/styles */
-.block-type-0 { background-color: #FF5733; } /* Red */
-.block-type-1 { background-color: #33FF57; } /* Green */
-.block-type-2 { background-color: #3357FF; } /* Blue */
-.block-type-3 { background-color: #FFFF33; } /* Yellow */
-.block-type-4 { background-color: #FF33FF; } /* Magenta */
-.block-type-5 { background-color: #33FFFF; } /* Cyan */
+/* Add block icons */
+.block::before {
+    content: "";
+    position: absolute;
+    width: 60%;
+    height: 60%;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.7;
+}
+
+.block-type-0::before { content: "♦"; } /* Red - diamond */
+.block-type-1::before { content: "★"; } /* Green - star */
+.block-type-2::before { content: "●"; } /* Blue - circle */
+.block-type-3::before { content: "▲"; } /* Yellow - triangle */
+.block-type-4::before { content: "✿"; } /* Magenta - flower */
+.block-type-5::before { content: "✦"; } /* Cyan - sparkle */
+
+/* Modern block colors with gradients */
+.block-type-0 { 
+    background: linear-gradient(135deg, #FF5733 0%, #FF2000 100%); 
+    border-color: rgba(255, 150, 120, 0.7);
+} /* Red */
+.block-type-1 { 
+    background: linear-gradient(135deg, #33FF57 0%, #00C030 100%);
+    border-color: rgba(150, 255, 150, 0.7);
+} /* Green */
+.block-type-2 { 
+    background: linear-gradient(135deg, #3357FF 0%, #0030C0 100%);
+    border-color: rgba(120, 150, 255, 0.7);
+} /* Blue */
+.block-type-3 { 
+    background: linear-gradient(135deg, #FFFF33 0%, #F0C000 100%);
+    border-color: rgba(255, 255, 150, 0.7);
+} /* Yellow */
+.block-type-4 { 
+    background: linear-gradient(135deg, #FF33FF 0%, #C000C0 100%);
+    border-color: rgba(255, 150, 255, 0.7);
+} /* Magenta */
+.block-type-5 { 
+    background: linear-gradient(135deg, #33FFFF 0%, #00C0C0 100%);
+    border-color: rgba(150, 255, 255, 0.7);
+} /* Cyan */
 
 .block.falling {
      /* Falling uses 'top' property transition */
@@ -93,26 +145,49 @@ body {
 .block.flashing {
     animation: flash 0.4s infinite alternate;
     /* Ensure transform doesn't interfere with flash scaling by applying it separately */
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
+    z-index: 5;
 }
         
 @keyframes flash {
-    0% { opacity: 1; box-shadow: 0 0 10px white; }
-    100% { opacity: 0.5; box-shadow: none; }
+    0% { 
+        opacity: 1; 
+        transform: translateY(0) scale(1.05);
+        box-shadow: 0 0 20px white, inset 0 0 15px rgba(255, 255, 255, 0.8);
+    }
+    100% { 
+        opacity: 0.7; 
+        transform: translateY(0) scale(0.95);
+        box-shadow: 0 0 5px rgba(255, 255, 255, 0.5), inset 0 0 5px rgba(255, 255, 255, 0.3);
+    }
 }
         
 #cursor {
     position: absolute;
-    width: 80px; /* 2 blocks wide */
-    height: 40px; /* 1 block high */
-    border: 3px solid #FFF;
+    width: 82px; /* 2 blocks wide + small gap for visual clarity */
+    height: 42px; /* 1 block high + small gap */
+    border: 3px solid rgba(255, 255, 255, 0.8);
+    border-radius: 8px;
     pointer-events: none; /* Don't interfere with clicks */
     /* Only transition horizontal moves; vertical rise uses transform for smooth motion */
     transition: left 0.05s linear;
     z-index: 10;
-    box-shadow: 0 0 8px #FFF;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.6), inset 0 0 5px rgba(255, 255, 255, 0.3);
     /* No transition on transform */
     transform: translateY(0px);
     will-change: transform, top, left;
+    animation: cursor-pulse 1.5s infinite alternate;
+}
+
+@keyframes cursor-pulse {
+    0% { 
+        border-color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.8), inset 0 0 5px rgba(255, 255, 255, 0.4);
+    }
+    100% { 
+        border-color: rgba(150, 200, 255, 0.7);
+        box-shadow: 0 0 8px rgba(100, 150, 255, 0.5), inset 0 0 3px rgba(100, 150, 255, 0.3);
+    }
 }
 
 /* Overlays */
@@ -122,7 +197,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.85);
+    background: linear-gradient(135deg, rgba(20, 20, 40, 0.95) 0%, rgba(10, 10, 30, 0.95) 100%);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -130,36 +205,71 @@ body {
     color: white;
     text-align: center;
     z-index: 20;
+    border-radius: 15px;
+    backdrop-filter: blur(5px);
 }
 
 #game-over-overlay h2, #start-overlay h2 {
     font-size: 2.5em;
     margin-bottom: 15px;
+    text-shadow: 0 0 10px rgba(100, 100, 255, 0.7);
+    color: #fff;
 }
 
 #game-over-overlay p, #start-overlay p {
     font-size: 1.2em;
     margin-bottom: 25px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+#final-score {
+    font-size: 1.5em !important;
+    color: #ffcc00;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 10px 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 15px rgba(255, 204, 0, 0.3);
+    margin: 15px 0 25px 0;
 }
 
 #game-over-overlay button, #start-overlay button {
     padding: 15px 30px;
     font-size: 1.2em;
     cursor: pointer;
-    background-color: #4CAF50;
+    background: linear-gradient(to bottom, #4CAF50, #3e8e41);
     border: none;
     color: white;
-    border-radius: 5px;
-    transition: background-color 0.2s;
+    border-radius: 8px;
+    transition: all 0.2s;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3), 0 3px 5px rgba(0, 0, 0, 0.2);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 #game-over-overlay button:hover, #start-overlay button:hover {
-    background-color: #45a049;
+    background: linear-gradient(to bottom, #45a049, #357a38);
+    transform: translateY(-2px);
+    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.4), 0 5px 8px rgba(0, 0, 0, 0.3);
+}
+
+#game-over-overlay button:active, #start-overlay button:active {
+    transform: translateY(1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
 }
 
 #start-overlay p.controls {
     margin-top: 20px;
-    font-size: 0.9em;
+    font-size: 0.95em;
     color: #ccc;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 15px 20px;
+    border-radius: 8px;
     max-width: 80%;
+    line-height: 1.5;
+    box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Special effects and animations */
+@keyframes game-board-glow {
+    0% { box-shadow: inset 0 0 20px rgba(0, 0, 150, 0.3); }
+    100% { box-shadow: inset 0 0 30px rgba(100, 100, 255, 0.4); }
 }
