@@ -16,7 +16,8 @@ import {
     INDIVIDUAL_REMOVE_DELAY,
     FALL_DURATION,
     SWAP_DURATION,
-    MIN_MATCH_LENGTH
+    MIN_MATCH_LENGTH,
+    FREEZE_DURATION
 } from './constants';
 
 /**
@@ -51,6 +52,12 @@ export class Game {
     
     // Timeout tracking
     private currentFallTimeout: NodeJS.Timeout | null = null;
+
+    // Grid freeze state
+    private isGridFrozen: boolean = false;
+    private freezeTimeoutId: NodeJS.Timeout | null = null;
+    private freezeTimeRemaining: number = 0;
+    private freezeStartTimestamp: number = 0;
 
     constructor(
         gameBoardElement: HTMLElement,
@@ -105,11 +112,43 @@ export class Game {
         }
     }
 
+    // --- Grid Freeze Methods ---
+    private freezeGrid(): void {
+        if (this.freezeTimeoutId) {
+            clearTimeout(this.freezeTimeoutId);
+        }
+        this.isGridFrozen = true;
+        this.freezeTimeRemaining = FREEZE_DURATION;
+        this.scheduleFreezeTimeout();
+        console.log(`Grid frozen for ${this.freezeTimeRemaining}ms`);
+    }
+
+    private scheduleFreezeTimeout(): void {
+        this.freezeStartTimestamp = performance.now();
+        this.freezeTimeoutId = setTimeout(() => this.unfreezeGrid(), this.freezeTimeRemaining);
+    }
+
+    private unfreezeGrid(): void {
+        this.isGridFrozen = false;
+        if (this.freezeTimeoutId) {
+            clearTimeout(this.freezeTimeoutId);
+            this.freezeTimeoutId = null;
+        }
+        console.log('Grid unfrozen');
+    }
+
     /**
      * Engages manual rise mode: grid rises at MAX_RISE_SPEED.
      */
     private startManualRise(): void {
         if (this.status !== 'running' || this.manualRaiseActive) return;
+        // Pause freeze timer if active
+        if (this.isGridFrozen && this.freezeTimeoutId) {
+            clearTimeout(this.freezeTimeoutId);
+            const elapsed = performance.now() - this.freezeStartTimestamp;
+            this.freezeTimeRemaining = Math.max(this.freezeTimeRemaining - elapsed, 0);
+            this.freezeTimeoutId = null;
+        }
         this.savedRiseSpeed = this.currentRiseSpeed;
         this.manualRaiseActive = true;
         this.currentRiseSpeed = MAX_RISE_SPEED * 2; // Double speed for manual rise
@@ -124,6 +163,10 @@ export class Game {
         this.manualRaiseActive = false;
         this.currentRiseSpeed = this.savedRiseSpeed;
         console.log('Manual rise disengaged');
+        // Resume freeze timer if grid is still frozen
+        if (this.isGridFrozen) {
+            this.scheduleFreezeTimeout();
+        }
     }
 
     /**
@@ -218,6 +261,17 @@ export class Game {
             return;
         }
 
+        // If grid is frozen and not manually raising, skip rise logic
+        if (this.isGridFrozen && !this.manualRaiseActive) {
+            // Still check for stuck processing
+            this.checkAndResetProcessingFlag(timestamp);
+            // Render current state
+            this.render();
+            // Request next frame
+            this.animationFrameId = requestAnimationFrame(this.gameLoop.bind(this));
+            return;
+        }
+
         const deltaTime = (timestamp - this.lastTimestamp) / 1000.0; // Delta time in seconds
         this.lastTimestamp = timestamp;
 
@@ -280,6 +334,8 @@ export class Game {
      * Renders the current game state using the Renderer.
      */
     private render(): void {
+        // Set renderer freeze flag (manual raise overrides)
+        this.renderer.gridFrozenFlag = this.isGridFrozen && !this.manualRaiseActive;
         // Update all block visuals (position, state, rise offset)
         this.grid.getAllBlocks().forEach(block => {
             this.renderer.updateBlockVisuals(block, this.riseOffset);
@@ -426,6 +482,8 @@ export class Game {
         const matches = this.grid.findMatches();
 
         if (matches.length > 0) {
+            // Freeze grid for combos/chains
+            this.freezeGrid();
             console.log(`Found ${matches.length} match groups. Chain: ${this.currentChain}`);
             this.currentChain++;
             this.renderer.updateChainDisplay(this.currentChain);

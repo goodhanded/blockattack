@@ -23,4 +23,7 @@ export const INDIVIDUAL_REMOVE_DELAY = 50; // ms delay between each block remova
 export const FALL_DURATION = 150; // ms for falling animation
 export const SWAP_DURATION = 80; // ms for swap animation
 
+// --- Grid Freeze Settings ---
+export const FREEZE_DURATION = 2000; // ms to freeze grid after combos/chains
+
 // --- Audio Assets and related functions removed, now handled by AudioManager.ts ---

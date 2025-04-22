@@ -155,6 +155,20 @@ body {
     box-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
     z-index: 5;
 }
+
+/* Bounce animation for blocks when grid is rising */
+.block.bouncing::before {
+    animation: bounce 0.8s infinite ease-in-out;
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: translate(-50%, -50%) translateY(0);
+    }
+    50% {
+        transform: translate(-50%, -50%) translateY(-5px);
+    }
+}
         
 @keyframes flash {
     0% { 

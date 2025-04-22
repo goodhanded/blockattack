@@ -7,6 +7,9 @@ import { BLOCK_SIZE, VISIBLE_GRID_HEIGHT, GRID_WIDTH } from './constants';
  * Handles all rendering tasks and direct DOM manipulation.
  */
 export class Renderer {
+    /** Flag set by Game to indicate grid is frozen */
+    public gridFrozenFlag: boolean = false;
+
     private gameBoardElement: HTMLElement;
     private cursorElement: HTMLElement;
     private scoreElement: HTMLElement;
@@ -92,6 +95,9 @@ export class Renderer {
         const visualRow = VISIBLE_GRID_HEIGHT - block.row;
         const targetY = visualRow * BLOCK_SIZE;
 
+        // Set CSS variable for bouncing
+        element.style.setProperty('--baseTop', `${targetY}px`);
+
         // We'll set these calculated positions as data attributes so they're not lost
         // during style updates
         element.dataset.baseX = targetX.toString();
@@ -106,6 +112,13 @@ export class Renderer {
 
         // Update state classes
         this.setBlockStateClass(element, block);
+
+        // Apply bouncing animation when grid is rising and not frozen
+        if (!this.gridFrozenFlag) {
+            element.classList.add('bouncing');
+        } else {
+            element.classList.remove('bouncing');
+        }
     }
 
     /**
