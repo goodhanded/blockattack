@@ -134,6 +134,8 @@ export class Game {
             clearTimeout(this.freezeTimeoutId);
             this.freezeTimeoutId = null;
         }
+        // Reset timing to avoid jump in rise offset after freeze
+        this.lastTimestamp = performance.now();
         console.log('Grid unfrozen');
     }
 
