@@ -232,6 +232,14 @@ export class Grid {
     }
 
     /**
+     * A block that is mid-clear or flashing is on its way out of the grid, so
+     * gravity must leave it where it is rather than carrying it down.
+     */
+    private canFall(block: Block): boolean {
+        return block.state !== 'clearing' && block.state !== 'flashing';
+    }
+
+    /**
      * Makes blocks fall down into empty spaces below them within the visible grid.
      * Updates block positions and sets their state to 'falling'.
      * @returns True if any blocks started falling, false otherwise.
@@ -245,14 +253,13 @@ export class Grid {
                 const block = this.getBlock(readRow, c);
                 if (block !== null) {
                     if (readRow > writeRow) {
-                        if (block.state === 'clearing' || block.state === 'flashing') {
+                        if (!this.canFall(block)) {
                             console.warn(`Block ${block.id} trying to fall while ${block.state}. Skipping fall.`);
                             continue;
                         }
 
                         blocksFell = true;
                         this.setBlock(writeRow, c, block);
-                        this.setBlock(readRow, c, null);
                         block.setState('falling');
                     }
                     writeRow++;
