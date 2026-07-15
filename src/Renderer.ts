@@ -89,26 +89,34 @@ export class Renderer {
 
         // Calculate horizontal position (always the same logic)
         const targetX = block.col * BLOCK_SIZE;
-        
+
         // Calculate vertical position - convert logical grid coordinates to screen coordinates
         // Row 0 is the bottom of the grid, VISIBLE_GRID_HEIGHT is at the top
         const visualRow = VISIBLE_GRID_HEIGHT - block.row;
         const targetY = visualRow * BLOCK_SIZE;
 
-        // Set CSS variable for bouncing
-        element.style.setProperty('--baseTop', `${targetY}px`);
+        // updateBlockVisuals runs for every block on every animation frame, but a
+        // block's position only changes when it moves or the grid rises. Writing
+        // identical left/top/transform still dirties layout, so skip the writes
+        // when nothing changed since the last frame.
+        const posKey = `${targetX}:${targetY}:${riseOffset}`;
+        if (element.dataset.posKey !== posKey) {
+            // Set CSS variable for bouncing
+            element.style.setProperty('--baseTop', `${targetY}px`);
 
-        // We'll set these calculated positions as data attributes so they're not lost
-        // during style updates
-        element.dataset.baseX = targetX.toString();
-        element.dataset.baseY = targetY.toString();
+            // Persist the calculated base position so it survives style updates
+            element.dataset.baseX = targetX.toString();
+            element.dataset.baseY = targetY.toString();
 
-        // Set the base position without transition effect
-        element.style.left = `${targetX}px`;
-        element.style.top = `${targetY}px`;
-        
-        // Apply the rise offset in pure transform with no transition
-        element.style.transform = `translateY(${-riseOffset}px)`;
+            // Set the base position without transition effect
+            element.style.left = `${targetX}px`;
+            element.style.top = `${targetY}px`;
+
+            // Apply the rise offset in pure transform with no transition
+            element.style.transform = `translateY(${-riseOffset}px)`;
+
+            element.dataset.posKey = posKey;
+        }
 
         // Update state classes
         this.setBlockStateClass(element, block);
