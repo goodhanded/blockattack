@@ -129,49 +129,29 @@ export class Grid {
             let type: BlockType;
             let attempts = 0;
             const blockAbove = this.getBlock(rowAboveIndex, c);
+            const blockTwoAbove = this.getBlock(rowAboveIndex + 1, c);
             const blockLeft = c > 0 ? this.getBlock(0, c - 1) : null;
             const blockTwoLeft = c > 1 ? this.getBlock(0, c - 2) : null;
 
+            // Reject a type that would complete a vertical OR horizontal run of
+            // three up front, so the row is match-free by construction. This
+            // folds in the old post-generation repair scan: guard once here
+            // instead of generating freely and fixing matches up afterwards.
             do {
                 type = Math.floor(Math.random() * BLOCK_TYPES);
                 attempts++;
             } while (
                 attempts < 10 &&
-                blockAbove?.type === type && blockAbove?.state === 'idle' &&
-                this.getBlock(rowAboveIndex + 1, c)?.type === type && this.getBlock(rowAboveIndex + 1, c)?.state === 'idle'
+                (
+                    (blockAbove?.type === type && blockAbove?.state === 'idle' &&
+                        blockTwoAbove?.type === type && blockTwoAbove?.state === 'idle') ||
+                    (blockLeft?.type === type && blockTwoLeft?.type === type)
+                )
             );
 
             const newBlock = new Block(0, c, type);
             this.setBlock(0, c, newBlock);
             newRowBlocks.push(newBlock);
-        }
-
-        let requiresCheck = true;
-        let checkCount = 0;
-        while (requiresCheck && checkCount < 5) {
-            requiresCheck = false;
-            checkCount++;
-            for (let c = 0; c < this.width - (MIN_MATCH_LENGTH - 1); c++) {
-                const firstBlock = this.getBlock(0, c);
-                if (!firstBlock) continue;
-                let match = true;
-                for (let i = 1; i < MIN_MATCH_LENGTH; i++) {
-                    if (!this.getBlock(0, c + i) || this.getBlock(0, c + i)!.type !== firstBlock.type) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) {
-                    const currentType = firstBlock.type;
-                    let newType: BlockType;
-                    do {
-                        newType = Math.floor(Math.random() * BLOCK_TYPES);
-                    } while (newType === currentType);
-                    firstBlock.type = newType;
-                    requiresCheck = true;
-                    c = -1;
-                }
-            }
         }
 
         console.log("New row generated.");
