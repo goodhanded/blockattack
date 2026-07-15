@@ -17,7 +17,10 @@ import {
     FALL_DURATION,
     SWAP_DURATION,
     MIN_MATCH_LENGTH,
-    FREEZE_DURATION
+    FREEZE_DURATION,
+    BASE_POINTS_PER_BLOCK,
+    CHAIN_STEP_BONUS,
+    COMBO_STEP_BONUS
 } from './constants';
 
 /**
@@ -492,9 +495,12 @@ export class Game {
             this.audioManager.playSound('clear');
 
             let pointsEarned = 0;
-            const basePointsPerBlock = 10;
+            // Scoring: base points per cleared block, a chain bonus that grows
+            // with each step of the chain, and a combo bonus that escalates for
+            // matches larger than the minimum.
+            const basePointsPerBlock = BASE_POINTS_PER_BLOCK;
+            const chainBonus = this.currentChain * CHAIN_STEP_BONUS;
             let comboBonus = 0;
-            const chainBonus = this.currentChain > 1 ? (this.currentChain - 1) * 50 : 0;
 
             const uniqueBlocksToClear = new Set<Block>();
             matches.forEach(matchList => {
@@ -504,9 +510,10 @@ export class Game {
                         uniqueBlocksToClear.add(block);
                     }
                 });
-                // Combo bonus for matches larger than the minimum
+                // Bigger matches escalate the combo bonus.
                 if (matchList.length > MIN_MATCH_LENGTH) {
-                    comboBonus += (matchList.length - MIN_MATCH_LENGTH) * 15;
+                    const extra = matchList.length - MIN_MATCH_LENGTH;
+                    comboBonus += extra * extra * COMBO_STEP_BONUS;
                 }
             });
 
