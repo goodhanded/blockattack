@@ -425,4 +425,25 @@ export class Grid {
         }
         return false;
     }
+
+    /**
+     * WIP: drop a row of "garbage" blocks from the top of the stack as an
+     * attack, the way opponent combos dump junk on you in Panel de Pon.
+     *
+     * TODO: garbage should be its own BlockType so it renders distinctly and
+     *       only breaks when an adjacent normal match clears against it.
+     * TODO: size the drop from the triggering combo/chain instead of a full row.
+     * TODO: nothing calls this yet, wire it into Game's chain handler.
+     */
+    dropGarbageRow(): Block[] {
+        const garbage: Block[] = [];
+        const topRow = this.visibleHeight;
+        for (let c = 0; c < this.width; c++) {
+            const type = Math.floor(Math.random() * BLOCK_TYPES);
+            const block = new Block(topRow, c, type);
+            this.setBlock(topRow, c, block);
+            garbage.push(block);
+        }
+        return garbage;
+    }
 }
