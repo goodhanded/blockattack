@@ -499,7 +499,7 @@ export class Game {
             // with each step of the chain, and a combo bonus that escalates for
             // matches larger than the minimum.
             const basePointsPerBlock = BASE_POINTS_PER_BLOCK;
-            const chainBonus = this.currentChain * CHAIN_STEP_BONUS;
+            const chainBonus = (this.currentChain - 1) * CHAIN_STEP_BONUS;
             let comboBonus = 0;
 
             const uniqueBlocksToClear = new Set<Block>();
