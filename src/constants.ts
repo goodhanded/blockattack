@@ -14,7 +14,7 @@ export const INITIAL_FILL_ROWS = 3; // Rows 1 through INITIAL_FILL_ROWS
 // --- Scoring ---
 export const BASE_POINTS_PER_BLOCK = 10; // points per cleared block
 export const CHAIN_STEP_BONUS = 50;      // bonus points per chain step
-export const COMBO_STEP_BONUS = 15;      // bonus per block beyond the minimum match length
+export const COMBO_STEP_BONUS = 15;      // combo bonus is this x (matchLength - MIN_MATCH_LENGTH)^2
 
 // --- Continuous Rise Constants ---
 export const INITIAL_RISE_SPEED = BLOCK_SIZE / 20.0; // Pixels per second (e.g., 1 block every 5 seconds)
